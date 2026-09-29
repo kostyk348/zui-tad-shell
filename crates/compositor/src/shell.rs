@@ -16,8 +16,10 @@ use phosphor::config::ShellConfig;
 use phosphor::hud::{self, Toast};
 use phosphor::menu::{self, Action, MenuState, ThemeId};
 use phosphor::panel::{draw_top_panel, hint_bar, PanelData};
+use phosphor::texture::{texture, TexKind};
 use phosphor::theme::{Metrics, Mode, Palette};
 use phosphor::widgets::Fonts;
+use phosphor::widgets::{draw_text, frame};
 use smithay::backend::allocator::Fourcc;
 use smithay::backend::renderer::element::memory::MemoryRenderBuffer;
 use smithay::utils::{Buffer, Rectangle, Size, Transform};
@@ -41,6 +43,8 @@ pub struct ShellCtx<'a> {
     pub clock: String,
     pub date: String,
     pub toast: Option<(String, String, f32)>,
+    /// Усыплённые окна: (x, y, w, h, заголовок) в мировых координатах.
+    pub placeholders: &'a [(f32, f32, f32, f32, String)],
 }
 
 /// Клавиши, которыми управляется оболочка (не приложение).
@@ -141,6 +145,9 @@ impl ShellLayer {
         ((ctx.zoom * 100.0) as i32).hash(&mut h);
         ((ctx.frame_ms * 4.0) as i32).hash(&mut h);
         ctx.quality.hash(&mut h);
+        for ph in ctx.placeholders {
+            ph.4.hash(&mut h);
+        }
         self.help.hash(&mut h);
         self.hud.hash(&mut h);
         self.focus_mode.hash(&mut h);
@@ -204,6 +211,47 @@ impl ShellLayer {
             &pal,
             &m,
         );
+
+        // Плейсхолдеры усыплённых окон (восстановленная сессия): холодный контур
+        // на месте живого окна + подпись, чтобы «где что было» не терялось.
+        {
+            let (cx, cy) = (ctx.camera.0, ctx.camera.1);
+            let z = ctx.zoom.max(0.02);
+            for (wx, wy, ww, wh, title) in ctx.placeholders {
+                let sx = (wx - cx) * z + w as f32 * 0.5;
+                let sy = (wy - cy) * z + h as f32 * 0.5;
+                let sw = ww * z;
+                let sh = wh * z;
+                if sx > w as f32 || sy > h as f32 || sx + sw < 0.0 || sy + sh < 0.0 {
+                    continue;
+                }
+                let c = phosphor::demo::with_alpha(pal.cold, 0x99);
+                frame(&mut pm, (sx, sy, sw, sh), c, m.line, 6.0);
+                texture(&mut pm, (sx, sy, sw, sh), TexKind::Bands, c, 6.0, 3);
+                if sh > 40.0 {
+                    draw_text(
+                        &mut pm,
+                        &fonts.bold,
+                        &title.to_uppercase(),
+                        sx + 10.0,
+                        sy + 18.0,
+                        m.value_size,
+                        m.tracking,
+                        c,
+                    );
+                    draw_text(
+                        &mut pm,
+                        &fonts.regular,
+                        "DORMANT · МЕСТО СОХРАНЕНО",
+                        sx + 10.0,
+                        sy + 34.0,
+                        m.label_size,
+                        m.tracking,
+                        pal.dim,
+                    );
+                }
+            }
+        }
 
         // HUD (миникарта, виталы) — можно выключить в focus mode
         if self.hud && !self.focus_mode {
@@ -510,6 +558,7 @@ mod tests {
             clock: clock.to_string(),
             date: "29 SEP".into(),
             toast: None,
+            placeholders: &[],
         };
         let k1 = s.redraw_key(&mk("21:47"));
         assert_ne!(k1, s.redraw_key(&mk("21:48")), "смена минуты → перерисовка");

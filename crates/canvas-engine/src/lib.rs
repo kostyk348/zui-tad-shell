@@ -9,6 +9,7 @@ pub mod culling;
 pub mod interact;
 pub mod layout;
 pub mod scene;
+pub mod session;
 
 pub use camera::{Aabb, Camera};
 pub use culling::{cull, hit_test, CulledVo, ScreenRect};
@@ -18,3 +19,4 @@ pub use scene::{
     place_new, CanvasWindow, ClusterId, Dir, FitPlan, OverviewPlan, Place, Scene, SnapResult,
     WindowId,
 };
+pub use session::{RestoreReport, Session, WindowRecord};

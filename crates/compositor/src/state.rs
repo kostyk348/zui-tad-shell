@@ -20,13 +20,14 @@ use smithay::{
         compositor::CompositorState as SmithayCompositorState,
         foreign_toplevel_list::{ForeignToplevelHandle, ForeignToplevelListState},
         seat::WaylandFocus,
-        selection::data_device::DataDeviceState,
+        selection::{data_device::DataDeviceState, primary_selection::PrimarySelectionState},
         session_lock::SessionLockManagerState,
         shell::{
             wlr_layer::WlrLayerShellState,
-            xdg::{ToplevelSurface, XdgShellState},
+            xdg::{decoration::XdgDecorationState, ToplevelSurface, XdgShellState},
         },
         shm::ShmState,
+        xdg_activation::XdgActivationState,
     },
 };
 use std::sync::Arc;
@@ -76,6 +77,12 @@ pub struct CompositorState {
     pub data_device: DataDeviceState,
     pub foreign_toplevel_list: ForeignToplevelListState,
     pub session_lock: SessionLockManagerState,
+    /// xdg-decoration: просим клиентов рисовать свои декорации (CSD).
+    pub decoration: XdgDecorationState,
+    /// primary selection (средняя кнопка мыши / выделение).
+    pub primary_selection: PrimarySelectionState,
+    /// xdg-activation: «открой то окно» (ссылки, .desktop, мессенджеры).
+    pub activation: XdgActivationState,
 
     pub seat_state: SeatState<CompositorState>,
     pub seat: Seat<CompositorState>,
@@ -101,6 +108,12 @@ pub struct CompositorState {
 
     /// Курсор в физических пикселях вьюпорта.
     pub pointer_pos: Point2<f32>,
+    /// Куда сохраняется сессия холста (JSON рядом с хранилищем).
+    pub session_path: std::path::PathBuf,
+    /// Когда последний раз сохраняли сессию.
+    pub last_session_save: Instant,
+    /// Подпись состояния холста (чтобы не писать файл без изменений).
+    pub last_session_sig: u64,
     /// Сглаженное время кадра композитора (мс) — показываем в панели.
     pub shell_frame_ms: f32,
     /// Счётчик serial для seat-событий.
@@ -112,6 +125,9 @@ pub struct CompositorState {
     pub last_click: Option<(Instant, WindowId)>,
     /// Клиент просит спрятать курсор.
     pub cursor_hidden: bool,
+    /// Курсор-поверхность от клиента (свой битмап курсора).
+    pub cursor_surface: Option<WlSurface>,
+    pub cursor_hotspot: (i32, i32),
 
     /// Window title → foreign toplevel handle for waybar.
     pub toplevel_handles: RwLock<Vec<ForeignToplevelHandle>>,
@@ -139,6 +155,9 @@ impl CompositorState {
             ForeignToplevelListState::new::<CompositorState>(&display_handle);
         let session_lock =
             SessionLockManagerState::new::<CompositorState, _>(&display_handle, |_| true);
+        let decoration = XdgDecorationState::new::<CompositorState>(&display_handle);
+        let primary_selection = PrimarySelectionState::new::<CompositorState>(&display_handle);
+        let activation = XdgActivationState::new::<CompositorState>(&display_handle);
 
         let mut seat_state = SeatState::<CompositorState>::new();
         let seat = seat_state.new_wl_seat(&display_handle, "seat0");
@@ -155,6 +174,9 @@ impl CompositorState {
             data_device,
             foreign_toplevel_list,
             session_lock,
+            decoration,
+            primary_selection,
+            activation,
             seat_state,
             seat,
             keyboard: None,
@@ -173,12 +195,17 @@ impl CompositorState {
             interact: Interact::new(),
             entries: Vec::new(),
             pointer_pos: Point2::new(640.0, 400.0),
+            session_path: std::path::PathBuf::from("data/session.json"),
+            last_session_save: Instant::now(),
+            last_session_sig: 0,
             shell_frame_ms: 0.0,
             serial_counter: 1,
             frame_time_ms: 0,
             last_configure: Instant::now() - std::time::Duration::from_secs(1),
             last_click: None,
             cursor_hidden: false,
+            cursor_surface: None,
+            cursor_hotspot: (0, 0),
             toplevel_handles: RwLock::new(Vec::new()),
         }
     }
@@ -257,7 +284,23 @@ impl CompositorState {
     ) -> WindowId {
         let window = Window::new_wayland_window(surface);
         let size_v = cgmath::Vector2::new(size.0 as f32, size.1 as f32);
-        let pos = canvas_engine::place_new(&self.canvas, &self.camera, size_v, 32.0);
+        // Если такое приложение было в восстановленной сессии — оно «усыновляет»
+        // своё место (dormant-плейсхолдер убираем), иначе кладём в центр камеры.
+        let adopted = self
+            .canvas
+            .windows()
+            .iter()
+            .find(|w| w.suspended && w.app_id == app_id)
+            .map(|w| (w.id, w.pos, w.size));
+        let pos = match adopted {
+            Some((old_id, p, s)) => {
+                self.canvas.remove(old_id);
+                tracing::info!("adopted session slot for app_id={app_id}");
+                p
+            }
+            None => canvas_engine::place_new(&self.canvas, &self.camera, size_v, 32.0),
+        };
+        let _ = size_v;
         let id = self
             .canvas
             .insert(app_id.clone(), title.clone(), pos, size_v, Place::Normal);

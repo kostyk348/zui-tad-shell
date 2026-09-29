@@ -39,6 +39,12 @@ smithay::delegate_foreign_toplevel_list!(CompositorState);
 smithay::delegate_session_lock!(CompositorState);
 #[cfg(feature = "smithay")]
 smithay::delegate_output!(CompositorState);
+#[cfg(feature = "smithay")]
+smithay::delegate_xdg_decoration!(CompositorState);
+#[cfg(feature = "smithay")]
+smithay::delegate_primary_selection!(CompositorState);
+#[cfg(feature = "smithay")]
+smithay::delegate_xdg_activation!(CompositorState);
 
 /// Start Wayland compositor or explain embedded mode.
 pub fn run_compositor(store: Arc<Mutex<GraphStore>>, embedded: bool) -> Result<()> {

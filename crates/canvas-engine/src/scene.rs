@@ -16,6 +16,7 @@
 
 use crate::camera::Aabb;
 use cgmath::{InnerSpace, Point2, Vector2};
+use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 
 pub type WindowId = u64;
@@ -33,7 +34,7 @@ pub enum Dir {
 }
 
 /// Как окно живёт на холсте.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 pub enum Place {
     /// Обычное окно: pan/zoom, Alt-Tab, snapping.
     Normal,
@@ -261,8 +262,11 @@ impl Scene {
         }
     }
 
+    /// Усыпить окно. Работает для любого `Place`: и обычное окно, и PiP
+    /// (закреплённое к экрану) могут стать плейсхолдером — например при
+    /// восстановлении сессии, где живых клиентов ещё нет.
     pub fn suspend(&mut self, id: WindowId) -> bool {
-        let ok = matches!(self.get(id), Some(w) if w.place == Place::Normal && !w.suspended);
+        let ok = matches!(self.get(id), Some(w) if !w.suspended);
         if !ok {
             return false;
         }
@@ -666,6 +670,61 @@ impl Scene {
             neighbors,
             cluster,
         })
+    }
+
+    /// Очистить холст (для восстановления сессии).
+    pub fn clear(&mut self) {
+        self.windows.clear();
+        self.mru.clear();
+        self.bookmarks = [None; 4];
+        self.anchors.clear();
+    }
+
+    /// Объединить уже существующие окна в кластер БЕЗ перемещения
+    /// (в отличие от `attach`, который придвигает края). Нужен для restore.
+    pub fn group(&mut self, ids: &[WindowId]) -> Option<ClusterId> {
+        let alive: Vec<WindowId> = ids
+            .iter()
+            .copied()
+            .filter(|id| self.get(*id).is_some())
+            .collect();
+        if alive.len() < 2 {
+            return None;
+        }
+        let old: Vec<ClusterId> = alive
+            .iter()
+            .filter_map(|id| self.get(*id).and_then(|w| w.cluster))
+            .collect();
+        let cluster = match old.first() {
+            Some(c) => *c,
+            None => self.alloc_cluster(),
+        };
+        for id in &alive {
+            if let Some(w) = self.get_mut(*id) {
+                w.cluster = Some(cluster);
+            }
+        }
+        for c in old {
+            if c != cluster {
+                let members: Vec<WindowId> = self
+                    .windows
+                    .iter()
+                    .filter(|w| w.cluster == Some(c))
+                    .map(|w| w.id)
+                    .collect();
+                for m in members {
+                    if let Some(w) = self.get_mut(m) {
+                        w.cluster = Some(cluster);
+                    }
+                }
+            }
+        }
+        self.drop_if_single(cluster);
+        if self.get(alive[0]).and_then(|w| w.cluster).is_some() {
+            Some(cluster)
+        } else {
+            None
+        }
     }
 
     fn alloc_cluster(&mut self) -> ClusterId {

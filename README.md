@@ -141,6 +141,33 @@ ZUI_WALLPAPER=~/Pictures/wp.png cargo run --release -p phosphor --bin zui-previe
 | `crates/tad-core`, `crates/de-common` | объектная модель RO/VO и общие утилиты DE |
 | `legacy/` | прежний стек (softbuffer-шелл, TAD-редакторы) — не собирается, см. `legacy/README.md` |
 
+### Сессия холста
+
+Раскладка переживает перезапуск: окна, кластеры, камера, закладки и якоря
+складываются в `data/session.json` (автосейв каждые 5 с при изменениях + при
+выходе). При старте холст восстанавливается **dormant**: окна возвращаются
+плейсхолдерами «DORMANT · МЕСТО СОХРАНЕНО», ничего не запускается само.
+Когда то же приложение запускают снова — оно **усыновляет своё место**
+(лог `adopted session slot for app_id=kitty`).
+
+```bash
+cat data/session.json | head -20     # посмотреть, что сохранено
+rm data/session.json                 # начать с чистого холста
+```
+
+### Протоколы
+
+Реализовано: `wl_compositor`, `xdg_shell`, `wl_shm`, `wl_seat` (+клавиатура,
+указатель), `wl_output`, `xdg-decoration` (честно отвечаем `client-side`),
+`primary-selection`, `xdg-activation` (активация фокусирует окно на холсте),
+`wlr-layer-shell`, `session-lock`, `foreign-toplevel-list`, `data-device`
+(буфер обмена), плюс курсоры-поверхности от клиентов.
+
+Чего нет и почему: **screencopy** в smithay 0.5 отсутствует как модуль
+(нужен свой protocol-модуль + экспорт кадров через `ExportMem`, либо
+xdg-desktop-portal); **ext-idle-notify** требует `calloop`-хендла, а наш цикл
+построен на winit — это отдельная переделка цикла.
+
 ### Известные ограничения
 
 * вложенный запуск под X11 без рабочего WM: синтетические клавиши (`xdotool key`) до

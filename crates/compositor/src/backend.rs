@@ -99,6 +99,8 @@ fn run_winit_backend(store: Arc<Mutex<GraphStore>>) -> Result<()> {
     let pointer = state.seat.add_pointer();
     state.pointer = Some(pointer.clone());
 
+    load_session(&mut state);
+
     let start_time = std::time::Instant::now();
     let mut iterations: u64 = 0;
 
@@ -184,6 +186,14 @@ fn run_winit_backend(store: Arc<Mutex<GraphStore>>) -> Result<()> {
             );
             (b, vp)
         };
+        // Усыплённые (в т.ч. восстановленные) окна — рисуем как плейсхолдеры.
+        let placeholders: Vec<(f32, f32, f32, f32, String)> = state
+            .canvas
+            .windows()
+            .iter()
+            .filter(|x| x.suspended)
+            .map(|x| (x.pos.x, x.pos.y, x.size.x, x.size.y, x.title.clone()))
+            .collect();
         let clock = chrono::Local::now();
         let ctx = ShellCtx {
             w: size.w as u32,
@@ -206,8 +216,25 @@ fn run_winit_backend(store: Arc<Mutex<GraphStore>>) -> Result<()> {
             clock: clock.format("%H:%M").to_string(),
             date: clock.format("%d %b").to_string().to_uppercase(),
             toast: None,
+            placeholders: &placeholders,
         };
         state.shell.refresh(&ctx);
+
+        // 2в. Курсор-поверхность от клиента (свой битмэп-курсор): рисуем поверх всего.
+        if let Some(cursor_surface) = state.cursor_surface.clone() {
+            let (hx, hy) = state.cursor_hotspot;
+            elements.extend(render_elements_from_surface_tree(
+                backend.renderer(),
+                &cursor_surface,
+                (
+                    state.pointer_pos.x.round() as i32 - hx,
+                    state.pointer_pos.y.round() as i32 - hy,
+                ),
+                1.0,
+                1.0,
+                Kind::Cursor,
+            ));
+        }
 
         // 3. Элемент оболочки — импортируем ДО создания кадра (камера раньше
         // держала бы мутабельное заимствование рендерера).
@@ -291,6 +318,16 @@ fn run_winit_backend(store: Arc<Mutex<GraphStore>>) -> Result<()> {
         // сглаженное время кадра — для панели и теле-метрик
         let ms = frame_t0.elapsed().as_secs_f32() * 1000.0;
         state.shell_frame_ms = state.shell_frame_ms * 0.85 + ms * 0.15;
+
+        // автосейв сессии холста (раз в 5 с; пишем только если подпись изменилась)
+        if state.last_session_save.elapsed() > std::time::Duration::from_secs(5) {
+            let sig = session_signature(&state);
+            if sig != state.last_session_sig {
+                save_session(&state);
+                state.last_session_sig = sig;
+            }
+            state.last_session_save = std::time::Instant::now();
+        }
     }
 }
 
@@ -307,7 +344,11 @@ fn handle_winit_event(
             state.set_viewport(size.w as u32, size.h as u32);
             state.update_output_mode(size.w as u32, size.h as u32);
         }
-        WinitEvent::CloseRequested => std::process::exit(0),
+        WinitEvent::CloseRequested => {
+            save_session(state);
+            state.shell.save();
+            std::process::exit(0);
+        }
         WinitEvent::Input(InputEvent::Keyboard { event }) => {
             let keycode = event.key_code();
             let key_state = event.state();
@@ -495,6 +536,11 @@ fn resize_zone(
 
 /// Курсор под текущий режим/зону (клиент может попросить спрятать его).
 fn set_hover_cursor(state: &CompositorState, win: &::winit::window::Window) {
+    // Клиент рисует собственный курсор-поверхностью — системный прячем.
+    if state.cursor_surface.is_some() {
+        win.set_cursor_visible(false);
+        return;
+    }
     // В cursor-icon нет варианта "скрыть" — используем видимость окна.
     if state.cursor_hidden {
         win.set_cursor_visible(false);
@@ -836,7 +882,71 @@ fn dispatch_action(state: &mut CompositorState, action: Action) {
         }
         Action::Quit => {
             state.shell.save();
+            save_session(state);
             std::process::exit(0);
         }
     }
+}
+
+// ------------------------------------------------------------------ сессия
+
+/// Загрузить сессию холста: окна приходят dormant-плейсхолдерами, камера — как была.
+fn load_session(state: &mut CompositorState) {
+    let path = state.session_path.clone();
+    let Ok(text) = std::fs::read_to_string(&path) else {
+        tracing::info!("session: файла нет ({}) — чистый холст", path.display());
+        return;
+    };
+    let Some(session) = canvas_engine::Session::from_json(&text) else {
+        tracing::warn!("session: {} не разобран — игнорируем", path.display());
+        return;
+    };
+    let report = session.apply(&mut state.canvas);
+    state.camera.center = cgmath::Point2::new(session.camera.0, session.camera.1);
+    state.camera.zoom = session.camera.2.clamp(0.05, 8.0);
+    state.last_session_sig = session_signature(state);
+    tracing::info!(
+        "session: восстановлено {} окон, {} кластеров (dormant), zoom={:.2}",
+        report.windows,
+        report.clusters,
+        state.camera.zoom
+    );
+}
+
+/// Сохранить сессию холста (окна + кластеры + камера + закладки/якоря).
+fn save_session(state: &CompositorState) {
+    let session =
+        canvas_engine::Session::from_scene(&state.canvas, state.camera.center, state.camera.zoom);
+    let json = session.to_json();
+    if let Some(dir) = state.session_path.parent() {
+        let _ = std::fs::create_dir_all(dir);
+    }
+    match std::fs::write(&state.session_path, json) {
+        Ok(_) => tracing::info!(
+            "session: сохранено {} окон в {}",
+            session.windows.len(),
+            state.session_path.display()
+        ),
+        Err(e) => tracing::warn!("session: не сохранить: {e}"),
+    }
+}
+
+/// Грубая подпись состояния холста — чтобы не писать файл без изменений.
+fn session_signature(state: &CompositorState) -> u64 {
+    use std::hash::{Hash, Hasher};
+    let mut h = std::collections::hash_map::DefaultHasher::new();
+    state.canvas.len().hash(&mut h);
+    for w in state.canvas.windows() {
+        w.app_id.hash(&mut h);
+        (w.pos.x as i32).hash(&mut h);
+        (w.pos.y as i32).hash(&mut h);
+        (w.size.x as i32).hash(&mut h);
+        (w.size.y as i32).hash(&mut h);
+        w.cluster.hash(&mut h);
+        w.suspended.hash(&mut h);
+    }
+    ((state.camera.center.x / 8.0) as i32).hash(&mut h);
+    ((state.camera.center.y / 8.0) as i32).hash(&mut h);
+    ((state.camera.zoom * 50.0) as i32).hash(&mut h);
+    h.finish()
 }

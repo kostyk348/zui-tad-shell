@@ -31,6 +31,7 @@ use smithay::{
         shm::{ShmHandler, ShmState},
     },
 };
+use wayland_protocols::xdg::decoration::zv1::server::zxdg_toplevel_decoration_v1;
 use wayland_protocols::xdg::shell::server::xdg_toplevel;
 
 impl BufferHandler for CompositorState {
@@ -243,6 +244,35 @@ impl XdgShellHandler for CompositorState {
     ) {
     }
 
+    /// Клиент поменял заголовок — обновляем запись на холсте (панель/HUD/сессия).
+    fn title_changed(&mut self, surface: ToplevelSurface) {
+        let title = surface_role_strings(surface.wl_surface())
+            .0
+            .unwrap_or_default();
+        if let Some(id) = self.id_for_surface(surface.wl_surface()) {
+            if let Some(w) = self.canvas.get_mut(id) {
+                if !title.is_empty() && w.title != title {
+                    w.title = title;
+                }
+            }
+        }
+    }
+
+    /// Клиент поменял app_id — важно для сессии (усыновление места) и правил окон.
+    fn app_id_changed(&mut self, surface: ToplevelSurface) {
+        let app_id = surface_role_strings(surface.wl_surface())
+            .1
+            .unwrap_or_default();
+        if let Some(id) = self.id_for_surface(surface.wl_surface()) {
+            if let Some(w) = self.canvas.get_mut(id) {
+                if !app_id.is_empty() && w.app_id != app_id {
+                    tracing::info!("app_id: {id} -> {app_id}");
+                    w.app_id = app_id;
+                }
+            }
+        }
+    }
+
     fn toplevel_destroyed(&mut self, surface: ToplevelSurface) {
         self.remove_toplevel(&surface);
     }
@@ -299,7 +329,23 @@ impl SeatHandler for CompositorState {
 
     fn focus_changed(&mut self, _seat: &Seat<Self>, _focused: Option<&WlSurface>) {}
     fn cursor_image(&mut self, _seat: &Seat<Self>, image: CursorImageStatus) {
-        self.cursor_hidden = matches!(image, CursorImageStatus::Hidden);
+        match image {
+            CursorImageStatus::Hidden => {
+                self.cursor_hidden = true;
+                self.cursor_surface = None;
+            }
+            CursorImageStatus::Surface(surface) => {
+                // Клиент рисует свой курсор — покажем его поверх всего.
+                self.cursor_hidden = false;
+                self.cursor_surface = Some(surface);
+            }
+            CursorImageStatus::Named(_) => {
+                // Именованные курсоры (cursor-shape-v1) оставляем системными:
+                // рисуем своим набором иконок ресайза/указателя.
+                self.cursor_hidden = false;
+                self.cursor_surface = None;
+            }
+        }
     }
 }
 
@@ -326,6 +372,23 @@ impl SessionLockHandler for CompositorState {
     }
 
     fn new_surface(&mut self, _surface: LockSurface, _output: WlOutput) {}
+}
+
+/// Прочитать (title, app_id) из роли xdg-toplevel: они живут в
+/// `XdgToplevelSurfaceData`, а не в pending-state.
+fn surface_role_strings(surface: &WlSurface) -> (Option<String>, Option<String>) {
+    smithay::wayland::compositor::with_states(surface, |states| {
+        match states
+            .data_map
+            .get::<smithay::wayland::shell::xdg::XdgToplevelSurfaceData>()
+        {
+            Some(data) => {
+                let attrs = data.lock().unwrap();
+                (attrs.title.clone(), attrs.app_id.clone())
+            }
+            None => (None, None),
+        }
+    })
 }
 
 /// Отправить клиенту новый размер холста + изменения состояний (maximize/fullscreen).
@@ -355,5 +418,65 @@ fn configure_with(
             });
             tl.send_configure();
         }
+    }
+}
+
+impl smithay::wayland::shell::xdg::decoration::XdgDecorationHandler for CompositorState {
+    fn new_decoration(&mut self, toplevel: ToplevelSurface) {
+        // Своих серверных декораций у нас нет (холст — не стекинг), поэтому
+        // честно просим клиента рисовать CSD.
+        toplevel.with_pending_state(|state| {
+            state.decoration_mode = Some(zxdg_toplevel_decoration_v1::Mode::ClientSide);
+        });
+        toplevel.send_configure();
+    }
+
+    fn request_mode(
+        &mut self,
+        toplevel: ToplevelSurface,
+        _mode: zxdg_toplevel_decoration_v1::Mode,
+    ) {
+        toplevel.with_pending_state(|state| {
+            state.decoration_mode = Some(zxdg_toplevel_decoration_v1::Mode::ClientSide);
+        });
+        toplevel.send_configure();
+    }
+
+    fn unset_mode(&mut self, toplevel: ToplevelSurface) {
+        toplevel.with_pending_state(|state| {
+            state.decoration_mode = Some(zxdg_toplevel_decoration_v1::Mode::ClientSide);
+        });
+        toplevel.send_configure();
+    }
+}
+
+impl smithay::wayland::selection::primary_selection::PrimarySelectionHandler for CompositorState {
+    fn primary_selection_state(
+        &self,
+    ) -> &smithay::wayland::selection::primary_selection::PrimarySelectionState {
+        &self.primary_selection
+    }
+}
+
+impl smithay::wayland::xdg_activation::XdgActivationHandler for CompositorState {
+    fn activation_state(&mut self) -> &mut smithay::wayland::xdg_activation::XdgActivationState {
+        &mut self.activation
+    }
+
+    /// Клиент просит активировать поверхность («открой это окно»).
+    fn request_activation(
+        &mut self,
+        token: smithay::wayland::xdg_activation::XdgActivationToken,
+        _data: smithay::wayland::xdg_activation::XdgActivationTokenData,
+        surface: WlSurface,
+    ) {
+        if let Some(id) = self.id_for_surface(&surface) {
+            let serial = self.next_serial();
+            self.focus_window(id, serial);
+            tracing::info!("xdg-activation: activated canvas_id={id}");
+        } else {
+            tracing::info!("xdg-activation: surface is not a canvas window");
+        }
+        let _ = self.activation.remove_token(&token);
     }
 }
