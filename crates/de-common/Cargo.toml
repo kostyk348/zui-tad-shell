@@ -1,0 +1,10 @@
+[package]
+name = "de-common"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[dependencies]
+cgmath.workspace = true
+tracing.workspace = true
+chrono = { version = "0.4", default-features = false, features = ["clock"] }

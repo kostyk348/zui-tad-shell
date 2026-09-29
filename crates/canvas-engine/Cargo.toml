@@ -1,0 +1,13 @@
+[package]
+name = "canvas-engine"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[dependencies]
+tad-core = { path = "../tad-core" }
+serde.workspace = true
+cgmath.workspace = true
+anyhow.workspace = true
+tracing.workspace = true
+ahash.workspace = true

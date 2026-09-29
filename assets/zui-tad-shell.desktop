@@ -1,0 +1,8 @@
+[Desktop Entry]
+Name=ZUI-TAD Shell
+Comment=Spatial zoomable desktop environment based on BTRON/TAD model
+Exec=zui-tad-shell-session
+TryExec=zui-tad-shell
+Type=Application
+DesktopNames=ZUI-TAD
+Keywords=spatial;zoomable;btron;tad;canvas;

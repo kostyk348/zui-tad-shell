@@ -1,0 +1,41 @@
+name: CI
+
+on:
+  push:
+    branches: [master, main]
+  pull_request:
+
+jobs:
+  core:
+    name: ядро и оболочка (CPU, без системных зависимостей)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: rustfmt
+      - uses: Swatinem/rust-cache@v2
+      - name: fmt
+        run: cargo fmt --all -- --check
+      - name: tests (canvas-engine + phosphor)
+        run: cargo test -p canvas-engine -p phosphor
+      - name: release build (shell binaries)
+        run: cargo build --release -p phosphor --bins
+      - name: сгенерировать обои (проверка, что генератор живой)
+        run: cargo run --release -q -p phosphor --bin gen_bg -- 960 540
+
+  compositor:
+    name: композитор (smithay, системные зависимости)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+      - name: deps
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            pkg-config libwayland-dev libxkbcommon-dev libudev-dev libseat-dev \
+            libinput-dev libdisplay-info-dev libgbm-dev libegl1-mesa-dev
+      - name: check (canvas compositor + bins)
+        run: cargo check -p compositor --features smithay --bins

@@ -1,0 +1,12 @@
+# build
+/target/
+/data/
+*.sled
+*.log
+# хвосты окружения
+php
+start-tmp
+*.vpk
+*.tmp
+# тяжёлые генерируемые обои (пересоздаются: cargo run -p phosphor --bin gen_bg)
+assets/backgrounds/crt-*.png

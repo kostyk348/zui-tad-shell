@@ -1,0 +1,16 @@
+[package]
+name = "skia-renderer"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[dependencies]
+tad-core = { path = "../tad-core" }
+canvas-engine = { path = "../canvas-engine" }
+cgmath.workspace = true
+anyhow.workspace = true
+tracing.workspace = true
+ahash.workspace = true
+tiny-skia.workspace = true
+ab_glyph.workspace = true
+image.workspace = true

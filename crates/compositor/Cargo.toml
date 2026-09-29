@@ -1,0 +1,35 @@
+[features]
+default = []
+# Full Wayland compositor on smithay 0.5 (requires system dev libs).
+smithay = [
+    "dep:smithay",
+    "dep:wayland-server",
+    "dep:wayland-protocols",
+    "dep:tracing-subscriber",
+    "dep:winit",
+]
+
+[package]
+name = "compositor"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[dependencies]
+de-common = { path = "../de-common" }
+tad-core = { path = "../tad-core" }
+canvas-engine = { path = "../canvas-engine" }
+cgmath.workspace = true
+anyhow.workspace = true
+tracing.workspace = true
+ahash.workspace = true
+parking_lot.workspace = true
+image.workspace = true
+uuid.workspace = true
+chrono = { version = "0.4", default-features = false, features = ["clock"] }
+
+smithay = { workspace = true, optional = true }
+wayland-server = { workspace = true, optional = true }
+wayland-protocols = { version = "0.32", optional = true }
+tracing-subscriber = { workspace = true, optional = true }
+winit = { workspace = true, optional = true, default-features = false, features = ["wayland", "wayland-dlopen", "x11", "rwh_06"] }

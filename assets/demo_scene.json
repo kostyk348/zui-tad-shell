@@ -1,0 +1,37 @@
+{
+  "name": "ZUI-TAD Demo Workspace",
+  "version": 1,
+  "description": "Three projects on the desktop map with cyclic portal links (BTRON RO/VO graph).",
+  "camera": {
+    "center": [800, 500],
+    "zoom": 0.35
+  },
+  "projects": [
+    {
+      "id": "project1",
+      "title": "Проект 1 — Отчёт о расходах",
+      "kind": "Text",
+      "features": ["expense_table", "portal_to_project2", "link_to_project3"]
+    },
+    {
+      "id": "project2",
+      "title": "Проект 2 — Mindmap",
+      "kind": "Mindmap",
+      "features": ["idea_branches", "link_back_to_project1"]
+    },
+    {
+      "id": "project3",
+      "title": "Проект 3 — Бюджет Q2",
+      "kind": "Table",
+      "features": ["budget_columns"]
+    }
+  ],
+  "demo_flow": [
+    "Zoom into Project 2 mindmap and edit text",
+    "Zoom out to see desktop portals",
+    "Click portal in Project 1 to fly to Project 2",
+    "Drag Project 1 VO onto Project 2 to reparent the table"
+  ],
+  "init_command": "cargo run --release -p shell-app --bin init_demo",
+  "store_path": "data/store.sled"
+}

@@ -1,0 +1,49 @@
+# ZUI-TAD Shell configuration
+# Place at: ~/.config/zui-tad/config.toml
+
+[launcher]
+# builtin | rofi | wofi | fuzzel | walker | tofi | dmenu
+backend = "builtin"
+# Только для rofi:
+# rofi_theme = "gruvbox-dark"
+
+[panel]
+# builtin | waybar | polybar | yambar | none
+backend = "builtin"
+# Для waybar:
+# waybar_config = "~/.config/waybar/config"
+# waybar_style = "~/.config/waybar/style.css"
+
+[wallpaper]
+# solid | swaybg | hyprpaper | wpaperd
+backend = "solid"
+color = "#1a1b20"
+# Для swaybg:
+# path = "~/Pictures/wallpaper.jpg"
+# mode = "fill"   # stretch | fit | fill | center | tile
+
+[locker]
+# none | swaylock | hyprlock | waylock
+backend = "swaylock"
+color = "#000000"
+# image = "~/Pictures/lock.jpg"
+
+[notifications]
+# none | mako | dunst | fnott
+backend = "mako"
+# mako_config = "~/.config/mako/config"
+
+[clipboard]
+# none | wl-clipboard
+backend = "wl-clipboard"
+
+[idle]
+# none | swayidle | hypridle
+backend = "swayidle"
+timeout = 300
+lock_cmd = "swaylock -f"
+
+[session]
+polkit = true
+xdg_portal = true
+autostart_script = true

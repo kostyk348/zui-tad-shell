@@ -1,0 +1,48 @@
+[package]
+name = "shell-app"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[[bin]]
+name = "zui-tad-shell"
+path = "src/main.rs"
+
+[[bin]]
+name = "render_screenshot"
+path = "src/screenshot.rs"
+
+[[bin]]
+name = "init_demo"
+path = "src/init_demo.rs"
+
+[features]
+default = []
+smithay-compositor = ["compositor/smithay"]
+
+[dependencies]
+tad-core = { path = "../tad-core" }
+canvas-engine = { path = "../canvas-engine" }
+editor-core = { path = "../editor-core" }
+skia-renderer = { path = "../skia-renderer" }
+de-common = { path = "../de-common" }
+compositor = { path = "../compositor" }
+native-apps = { path = "../native-apps" }
+
+serde.workspace = true
+serde_json.workspace = true
+cgmath.workspace = true
+anyhow.workspace = true
+tracing.workspace = true
+tracing-subscriber.workspace = true
+ahash.workspace = true
+parking_lot.workspace = true
+uuid.workspace = true
+image.workspace = true
+sled.workspace = true
+winit.workspace = true
+softbuffer.workspace = true
+tiny-skia.workspace = true
+ab_glyph.workspace = true
+chrono = "0.4"
+toml.workspace = true
