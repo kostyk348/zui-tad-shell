@@ -12,6 +12,8 @@ mod backend;
 #[cfg(feature = "smithay")]
 mod handlers;
 #[cfg(feature = "smithay")]
+mod shell;
+#[cfg(feature = "smithay")]
 mod state;
 #[cfg(feature = "smithay")]
 mod windows;

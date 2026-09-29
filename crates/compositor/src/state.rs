@@ -34,6 +34,7 @@ use std::time::Instant;
 use tad_core::{GraphStore, RoId, VirtualObject, VoId};
 use uuid::Uuid;
 
+use crate::shell::ShellLayer;
 use crate::windows::WindowTracker;
 
 /// Per-client compositor data (required by smithay 0.5).
@@ -93,11 +94,15 @@ pub struct CompositorState {
     /// Мост Wayland ↔ холст.
     pub canvas: Scene,
     pub camera: Camera,
+    /// Оболочка (панель/HUD/меню) — рисуется поверх окон.
+    pub shell: ShellLayer,
     pub interact: Interact,
     pub entries: Vec<WindowEntry>,
 
     /// Курсор в физических пикселях вьюпорта.
     pub pointer_pos: Point2<f32>,
+    /// Сглаженное время кадра композитора (мс) — показываем в панели.
+    pub shell_frame_ms: f32,
     /// Счётчик serial для seat-событий.
     pub serial_counter: u32,
     pub frame_time_ms: u32,
@@ -164,9 +169,11 @@ impl CompositorState {
             locked: false,
             canvas: Scene::new(),
             camera: Camera::new(cgmath::Vector2::new(1280, 800)),
+            shell: ShellLayer::new(),
             interact: Interact::new(),
             entries: Vec::new(),
             pointer_pos: Point2::new(640.0, 400.0),
+            shell_frame_ms: 0.0,
             serial_counter: 1,
             frame_time_ms: 0,
             last_configure: Instant::now() - std::time::Duration::from_secs(1),

@@ -91,6 +91,10 @@ impl XdgShellHandler for CompositorState {
         self.toplevel_handles.write().push(handle);
 
         let id = self.insert_toplevel(surface, title.clone(), app_id, (w as u32, h as u32));
+        // Новое окно сразу получает фокус ввода (как в любом WM) — иначе
+        // горячие клавиши не доходят до нас, пока не кликнешь мышью.
+        let serial = self.next_serial();
+        self.focus_window(id, serial);
         tracing::info!("New toplevel: {title} canvas_id={id}");
     }
 

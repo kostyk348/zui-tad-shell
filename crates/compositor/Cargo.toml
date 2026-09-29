@@ -17,6 +17,8 @@ license.workspace = true
 
 [dependencies]
 de-common = { path = "../de-common" }
+phosphor = { path = "../phosphor" }
+tiny-skia.workspace = true
 tad-core = { path = "../tad-core" }
 canvas-engine = { path = "../canvas-engine" }
 cgmath.workspace = true

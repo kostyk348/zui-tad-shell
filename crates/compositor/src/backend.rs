@@ -9,12 +9,14 @@
 //!
 //! Здесь нет DRM/TTY: это вложенный (nested) бэкенд для разработки.
 
+use crate::shell::{ShellCtx, ShellKey};
 use crate::state::{ClientData, CompositorState};
 use ::winit::window::CursorIcon;
 use anyhow::Result;
 use canvas_engine::{layout_windows, Dir, Mode, ResizeHandle, WindowId};
 use cgmath::Point2;
 use parking_lot::Mutex;
+use phosphor::menu::Action;
 use smithay::{
     backend::{
         input::{
@@ -23,12 +25,13 @@ use smithay::{
         },
         renderer::{
             element::{
+                memory::MemoryRenderBufferRenderElement,
                 surface::{render_elements_from_surface_tree, WaylandSurfaceRenderElement},
                 Kind,
             },
             gles::GlesRenderer,
             utils::draw_render_elements,
-            Color32F, Frame, Renderer,
+            Color32F, Frame, ImportMem, Renderer,
         },
         winit::{self, WinitEvent},
     },
@@ -37,7 +40,7 @@ use smithay::{
         pointer::{ButtonEvent, MotionEvent, PointerHandle},
     },
     reexports::wayland_server::Display,
-    utils::{Logical, Point, Rectangle, Size, Transform},
+    utils::{Buffer, Logical, Point, Rectangle, Size, Transform},
     wayland::{
         compositor::{with_surface_tree_downward, SurfaceAttributes, TraversalAction},
         seat::WaylandFocus,
@@ -100,6 +103,7 @@ fn run_winit_backend(store: Arc<Mutex<GraphStore>>) -> Result<()> {
     let mut iterations: u64 = 0;
 
     loop {
+        let frame_t0 = std::time::Instant::now();
         let status = winit.dispatch_new_events(|event| {
             handle_winit_event(&mut state, event, &keyboard, &pointer);
         });
@@ -141,7 +145,86 @@ fn run_winit_backend(store: Arc<Mutex<GraphStore>>) -> Result<()> {
             }
         }
 
-        // 3. Кадр.
+        // 2б. Оболочка: обновляем слой, если изменилось содержимое.
+        let shell_wins: Vec<(f32, f32, f32, f32, bool)> = state
+            .canvas
+            .windows()
+            .iter()
+            .filter(|x| !x.suspended)
+            .map(|x| {
+                (
+                    x.pos.x,
+                    x.pos.y,
+                    x.size.x,
+                    x.size.y,
+                    Some(x.id) == state.canvas.focus(),
+                )
+            })
+            .collect();
+        let (sbounds, svp) = {
+            let b = state
+                .canvas
+                .content_bounds(false)
+                .map(|b| {
+                    (
+                        b.min.x,
+                        b.min.y,
+                        (b.max.x - b.min.x).max(1.0),
+                        (b.max.y - b.min.y).max(1.0),
+                    )
+                })
+                .unwrap_or((0.0, 0.0, 1.0, 1.0));
+            let vw = state.camera.viewport.x as f32 / state.camera.zoom.max(0.01);
+            let vh = state.camera.viewport.y as f32 / state.camera.zoom.max(0.01);
+            let vp = (
+                state.camera.center.x - vw * 0.5,
+                state.camera.center.y - vh * 0.5,
+                vw,
+                vh,
+            );
+            (b, vp)
+        };
+        let clock = chrono::Local::now();
+        let ctx = ShellCtx {
+            w: size.w as u32,
+            h: size.h as u32,
+            camera: (state.camera.center.x, state.camera.center.y),
+            zoom: state.camera.zoom,
+            windows: &shell_wins,
+            bounds: sbounds,
+            viewport: svp,
+            suspended: state
+                .canvas
+                .windows()
+                .iter()
+                .filter(|x| x.suspended)
+                .count(),
+            clusters: state.canvas.clusters().len(),
+            frame_ms: state.shell_frame_ms,
+            quality: state.shell.quality,
+            title: "zui-tad",
+            clock: clock.format("%H:%M").to_string(),
+            date: clock.format("%d %b").to_string().to_uppercase(),
+            toast: None,
+        };
+        state.shell.refresh(&ctx);
+
+        // 3. Элемент оболочки — импортируем ДО создания кадра (камера раньше
+        // держала бы мутабельное заимствование рендерера).
+        let shell_el = state.shell.buffer.as_ref().and_then(|buf| {
+            MemoryRenderBufferRenderElement::from_buffer(
+                backend.renderer(),
+                Point::<f64, smithay::utils::Physical>::from((0.0, 0.0)),
+                buf,
+                Some(1.0),
+                None,
+                Some(Size::<i32, Logical>::from((size.w, size.h))),
+                Kind::Unspecified,
+            )
+            .ok()
+        });
+
+        // 4. Кадр.
         let bg = Color32F::new(0.032, 0.036, 0.042, 1.0);
         let mut frame = backend
             .renderer()
@@ -152,6 +235,10 @@ fn run_winit_backend(store: Arc<Mutex<GraphStore>>) -> Result<()> {
             .map_err(|e| anyhow::anyhow!("clear: {e}"))?;
         draw_render_elements(&mut frame, 1.0, &elements, &[damage])
             .map_err(|e| anyhow::anyhow!("draw: {e}"))?;
+        // Оболочка — поверх окон (панель/HUD/меню).
+        if let Some(el) = shell_el {
+            let _ = draw_render_elements(&mut frame, 1.0, &[el], &[damage]);
+        }
         let _ = frame.finish();
 
         // 4. Кадровые колбэки клиентам.
@@ -201,6 +288,9 @@ fn run_winit_backend(store: Arc<Mutex<GraphStore>>) -> Result<()> {
         backend
             .submit(Some(&[damage]))
             .map_err(|e| anyhow::anyhow!("submit: {e}"))?;
+        // сглаженное время кадра — для панели и теле-метрик
+        let ms = frame_t0.elapsed().as_secs_f32() * 1000.0;
+        state.shell_frame_ms = state.shell_frame_ms * 0.85 + ms * 0.15;
     }
 }
 
@@ -324,6 +414,19 @@ fn on_primary_press(
     keyboard: &KeyboardHandle<CompositorState>,
     serial: smithay::utils::Serial,
 ) {
+    // Оболочка перехватывает клики (панель/меню) — в приложения не уходят.
+    let vp = state.viewport();
+    let screen = (vp.x.max(1), vp.y.max(1));
+    if let Some(action) = state
+        .shell
+        .handle_click(state.pointer_pos.x, state.pointer_pos.y, screen)
+    {
+        if let Some(a) = action {
+            dispatch_action(state, a);
+        }
+        return;
+    }
+
     let canvas_pt = state.canvas_point();
     let mods = keyboard.modifier_state();
 
@@ -659,4 +762,81 @@ fn send_frames_surface_tree(surface: &WlSurface, time: u32) {
         },
         |_, _, &()| true,
     );
+}
+
+/// Клавиша → действие оболочки (если она это действие забирает).
+fn shell_key_for(sym: u32, logo: bool) -> Option<ShellKey> {
+    use keysyms::*;
+    Some(match sym {
+        KEY_Up => ShellKey::Up,
+        KEY_Down => ShellKey::Down,
+        KEY_Return | KEY_KP_Enter => ShellKey::Enter,
+        KEY_Escape => ShellKey::Esc,
+        KEY_BackSpace => ShellKey::Backspace,
+        KEY_F1 | KEY_Help => ShellKey::ToggleHelp,
+        KEY_F2 => ShellKey::ToggleHud,
+        KEY_F3 => ShellKey::ToggleFocus,
+        KEY_F6 => ShellKey::NextQuality,
+        KEY_F12 | KEY_Menu => ShellKey::ToggleMenu,
+        _ if logo && (sym == KEY_d || sym == KEY_slash) => ShellKey::ToggleMenu,
+        _ => {
+            // буквы/цифры — только когда меню открыто (иначе уходят в приложение)
+            let c = char::from_u32(sym).filter(|c| c.is_ascii_graphic() || *c == ' ');
+            return c.map(ShellKey::Char);
+        }
+    })
+}
+
+/// Выполнить действие меню в композиторе.
+fn dispatch_action(state: &mut CompositorState, action: Action) {
+    use phosphor::menu::ThemeId;
+    tracing::info!("shell action: {}", crate::shell::action_name(&action));
+    match action {
+        Action::SetTheme(t) => state.shell.set_theme(t),
+        Action::ToggleHud => {
+            state.shell.hud = !state.shell.hud;
+        }
+        Action::ToggleFocus => {
+            state.shell.focus_mode = !state.shell.focus_mode;
+        }
+        Action::ToggleVitals => {
+            state.shell.vitals = !state.shell.vitals;
+        }
+        Action::ToggleBeam => {
+            state.shell.beam = !state.shell.beam;
+        }
+        Action::QualityAuto => state.shell.quality = "AUTO·RICH",
+        Action::QualityRich => state.shell.quality = "RICH",
+        Action::QualityLean => state.shell.quality = "LEAN",
+        Action::Help => state.shell.help = true,
+        Action::Launcher => spawn_terminal(),
+        Action::Home => {
+            state.camera.center = state.canvas.origin;
+            state.camera.zoom = 1.0;
+        }
+        Action::Overview => {
+            let vp = state.viewport();
+            if let Some(plan) = state.canvas.zoom_to_fit(vp, 64.0) {
+                state.camera.center = plan.camera_center;
+                state.camera.zoom = plan.zoom;
+            }
+        }
+        Action::FitWindow => fit_window(state),
+        Action::SuspendFocused => {
+            if let Some(id) = state.canvas.focus() {
+                state.canvas.suspend(id);
+            }
+        }
+        Action::CycleWindows => {
+            let serial = state.next_serial();
+            if let Some(next) = state.canvas.mru_cycle(state.canvas.focus(), true) {
+                state.focus_window(next, serial);
+                fly_to(state, next);
+            }
+        }
+        Action::Quit => {
+            state.shell.save();
+            std::process::exit(0);
+        }
+    }
 }

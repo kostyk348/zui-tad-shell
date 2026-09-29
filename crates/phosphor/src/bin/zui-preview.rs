@@ -38,7 +38,7 @@ use phosphor::menu::{self, Action, MenuState, ThemeId};
 use phosphor::panel::{draw_top_panel, PanelData};
 use phosphor::texture::{texture, TexKind};
 use phosphor::theme::{Metrics, Mode as ThemeMode, Palette};
-use phosphor::widgets::{draw_text, hairline, text_width, Fonts};
+use phosphor::widgets::Fonts;
 use tiny_skia::Pixmap;
 use winit::application::ApplicationHandler;
 use winit::dpi::LogicalSize;
@@ -929,15 +929,22 @@ impl App {
 
         // Нижняя строка подсказок: шелл должен объяснять себя сам.
         if !self.focus_mode {
-            hint_bar(
+            let hint = if self.menu.is_some() {
+                ": фильтр · ↑↓ выбор · ENTER выполнить · ESC закрыть"
+            } else if self.help {
+                "ESC — вернуться"
+            } else {
+                ": меню · ? справка · L лаунчер · W overview · M fit · S suspend · TAB окна · F2 HUD · F3 focus · 1/2/3 тема"
+            };
+            phosphor::panel::hint_bar(
                 &mut pm,
                 &fonts,
                 &pal,
                 &m,
                 w as f32,
                 h as f32,
-                self.menu.is_some(),
-                self.help,
+                hint,
+                &format!("{:.0} FPS · {}", self.last_fps, self.render_mode),
             );
         }
 
@@ -1050,57 +1057,6 @@ impl App {
         });
         let _ = buffer.present();
     }
-}
-
-/// Нижняя строка подсказок (Noctalia-подобная «self-documenting» панель).
-fn hint_bar(
-    pm: &mut Pixmap,
-    fonts: &Fonts,
-    pal: &Palette,
-    m: &Metrics,
-    w: f32,
-    h: f32,
-    menu_open: bool,
-    help_open: bool,
-) {
-    let bar_h = 18.0;
-    let y = h - bar_h;
-    let mut bg = tiny_skia::Paint::default();
-    bg.set_color_rgba8(pal.panel_bg[0], pal.panel_bg[1], pal.panel_bg[2], 0xdd);
-    if let Some(r) = tiny_skia::Rect::from_xywh(0.0, y, w, bar_h) {
-        pm.fill_rect(r, &bg, tiny_skia::Transform::identity(), None);
-    }
-    texture(pm, (0.0, y, w, bar_h), TexKind::Bands, pal.dim, 4.0, 21);
-    hairline(pm, 0.0, y, w, y, pal.dim, m.line);
-    let text = if menu_open {
-        ": фильтр · ↑↓ выбор · ENTER выполнить · ESC закрыть"
-    } else if help_open {
-        "ESC — вернуться"
-    } else {
-        ": меню · ? справка · L лаунчер · W overview · M fit · S suspend · TAB окна · F2 HUD · F3 focus · 1/2/3 тема"
-    };
-    draw_text(
-        pm,
-        &fonts.regular,
-        text,
-        12.0,
-        y + 13.0,
-        m.label_size,
-        m.tracking,
-        pal.dim,
-    );
-    let right = "60 FPS · CPU";
-    let rw = text_width(&fonts.regular, right, m.label_size, m.tracking);
-    draw_text(
-        pm,
-        &fonts.regular,
-        right,
-        w - rw - 12.0,
-        y + 13.0,
-        m.label_size,
-        m.tracking,
-        pal.primary,
-    );
 }
 
 impl ApplicationHandler for App {

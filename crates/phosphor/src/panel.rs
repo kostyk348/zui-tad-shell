@@ -249,6 +249,52 @@ pub fn draw_top_panel(
     }
 }
 
+/// Нижняя строка подсказок: шелл объясняет себя сам.
+/// `hint` — контекстная левая часть, `right` — правая (например, «60 FPS · CPU»).
+pub fn hint_bar(
+    pm: &mut Pixmap,
+    fonts: &Fonts,
+    pal: &Palette,
+    m: &Metrics,
+    width: f32,
+    height: f32,
+    hint: &str,
+    right: &str,
+) {
+    let bar_h = 18.0;
+    let y = height - bar_h;
+    let mut bg = Paint::default();
+    bg.set_color_rgba8(pal.panel_bg[0], pal.panel_bg[1], pal.panel_bg[2], 0xdd);
+    if let Some(r) = Rect::from_xywh(0.0, y, width, bar_h) {
+        pm.fill_rect(r, &bg, Transform::identity(), None);
+    }
+    texture(pm, (0.0, y, width, bar_h), TexKind::Bands, pal.dim, 4.0, 21);
+    hairline(pm, 0.0, y, width, y, pal.dim, m.line);
+    draw_text(
+        pm,
+        &fonts.regular,
+        hint,
+        12.0,
+        y + 13.0,
+        m.label_size,
+        m.tracking,
+        pal.dim,
+    );
+    if !right.is_empty() {
+        let rw = text_width(&fonts.regular, right, m.label_size, m.tracking);
+        draw_text(
+            pm,
+            &fonts.regular,
+            right,
+            width - rw - 12.0,
+            y + 13.0,
+            m.label_size,
+            m.tracking,
+            pal.primary,
+        );
+    }
+}
+
 /// Утилита для скриншота: правая колонка телеметрии как список строк.
 pub fn draw_side_list(
     pm: &mut Pixmap,
