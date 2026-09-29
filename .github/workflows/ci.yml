@@ -39,3 +39,5 @@ jobs:
             libinput-dev libdisplay-info-dev libgbm-dev libdrm-dev libegl-dev libgles-dev
       - name: check (canvas compositor + bins)
         run: cargo check -p compositor --features smithay --bins
+      - name: tests (оболочка композитора: меню/клики/клавиши)
+        run: cargo test -p compositor --features smithay
