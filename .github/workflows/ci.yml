@@ -36,6 +36,6 @@ jobs:
           sudo apt-get update
           sudo apt-get install -y --no-install-recommends \
             pkg-config libwayland-dev libxkbcommon-dev libudev-dev libseat-dev \
-            libinput-dev libdisplay-info-dev libgbm-dev libegl1-mesa-dev
+            libinput-dev libdisplay-info-dev libgbm-dev libdrm-dev libegl-dev libgles-dev
       - name: check (canvas compositor + bins)
         run: cargo check -p compositor --features smithay --bins
