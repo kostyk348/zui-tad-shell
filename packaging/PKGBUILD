@@ -1,0 +1,38 @@
+# Maintainer: Konstantin Parachuk <parachuk2001@gmail.com>
+# Сборка: makepkg -si   (Artix/Arch)
+pkgname=zui-tad-shell
+pkgver=0.1.0
+pkgrel=1
+pkgdesc="Infinite-canvas Wayland desktop: windows on an endless 2D canvas with a phosphor-CRT shell"
+arch=('x86_64' 'aarch64')
+url="https://github.com/kostyk348/zui-tad-shell"
+license=('MIT')
+depends=('gcc-libs' 'libseat' 'libinput' 'libdisplay-info' 'libxkbcommon' 'mesa' 'libdrm' 'wayland' 'ttf-dejavu')
+makedepends=('cargo' 'pkgconf' 'libudev' 'libgbm')
+provides=('zui-tad-shell')
+source=("$pkgname-$pkgver.tar.gz::$url/archive/refs/tags/v$pkgver.tar.gz")
+sha256sums=('SKIP')
+
+build() {
+    cd "$pkgname-$pkgver"
+    export CARGO_TARGET_DIR=target
+    # оболочка (CPU, без системных зависимостей) + композитор (smithay)
+    cargo build --release -p phosphor --bins --locked
+    cargo build --release -p compositor --features smithay --bin zui-compositor --locked
+}
+
+package() {
+    cd "$pkgname-$pkgver"
+    install -Dm755 target/release/zui-compositor "$pkgdir/usr/bin/zui-compositor"
+    install -Dm755 target/release/zui-preview "$pkgdir/usr/bin/zui-tad-preview"
+    install -Dm755 target/release/shell_shot "$pkgdir/usr/bin/zui-tad-shot"
+    install -Dm755 target/release/gen_bg "$pkgdir/usr/bin/zui-tad-genbg"
+    install -Dm755 assets/zui-tad-session.sh "$pkgdir/usr/bin/zui-tad-session"
+    install -Dm644 assets/zui-tad.desktop "$pkgdir/usr/share/wayland-sessions/zui-tad.desktop"
+    install -Dm644 assets/zui-tad.desktop "$pkgdir/usr/share/xsessions/zui-tad.desktop"
+    install -Dm644 LICENSE "$pkgdir/usr/share/licenses/$pkgname/LICENSE"
+    install -Dm644 docs/ARCHITECTURE.md "$pkgdir/usr/share/doc/$pkgname/ARCHITECTURE.md"
+    install -Dm644 README.md "$pkgdir/usr/share/doc/$pkgname/README.md"
+    install -dm755 "$pkgdir/usr/share/zui-tad/backgrounds"
+    install -m644 assets/backgrounds/*.png "$pkgdir/usr/share/zui-tad/backgrounds/"
+}

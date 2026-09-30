@@ -1,0 +1,16 @@
+# Опционально: запуск ZUI-TAD как пользовательского сервиса из TTY.
+# Обычный путь — сессия из DM (см. assets/zui-tad.desktop), этот файл нужен,
+# если хочется автозапуск после логина в консоль:
+#   systemctl --user enable --now zui-tad.service
+[Unit]
+Description=ZUI-TAD infinite-canvas compositor
+After=graphical-session-pre.target
+
+[Service]
+Type=simple
+ExecStart=/usr/local/bin/zui-compositor
+Restart=on-failure
+RestartSec=2
+
+[Install]
+WantedBy=default.target

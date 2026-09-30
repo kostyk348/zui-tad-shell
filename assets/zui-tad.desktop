@@ -1,0 +1,6 @@
+[Desktop Entry]
+Name=ZUI-TAD
+Comment=Infinite-canvas Wayland desktop with phosphor shell
+Exec=/usr/local/bin/zui-tad-session
+Type=Application
+DesktopNames=zui-tad

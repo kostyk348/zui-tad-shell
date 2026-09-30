@@ -74,6 +74,45 @@ XDG_RUNTIME_DIR=/run/user/$UID WAYLAND_DISPLAY=zui-tad-0 alacritty
 
 ---
 
+## Запуск как настоящая сессия
+
+```bash
+./install.sh                # бинари + сессии для DM (нужен sudo) 
+./install.sh --user         # то же в ~/.local (без root)
+zui-compositor --check      # ЧТО ГОТОВО, а что нет — до попытки входа
+```
+
+`--check` смотрит окружение и говорит прямо: есть ли DRM-карты, подключённые
+коннекторы, устройства ввода, группы, конфиг и сессия холста. Пример вывода на
+машине, где уже запущен X11:
+
+```
+! мы внутри сессии (SESSION_TYPE="x11") — DRM/TTY отсюда не занять
+✓ DRM-карты: ["card1"]
+✓ подключено: ["card1-eDP-1"]
+✓ устройств ввода: 14
+итог: 6 ok, 1 предупреждений, 0 проблем
+```
+
+Дальше — либо сессия из DM (выбрать **ZUI-TAD** на экране входа: ставится в
+`/usr/share/wayland-sessions`), либо из TTY:
+
+```bash
+# из консоли, без графической сессии
+ZUI_STORE_PATH=~/.local/state/zui-tad/store.sled zui-compositor --drm
+```
+
+Автозапуск своих приложений — `~/.config/zui-tad/autostart.sh` (исполняемый).
+Логи — `~/.local/state/zui-tad/zui-tad.log`.
+
+Пакетирование: `packaging/PKGBUILD` (Artix/Arch), `packaging/zui-tad.service`
+(пользовательский systemd-юнит для запуска из консоли).
+
+**Статус честно**: HTTP-сессия из DM/TTY требует DRM/TTY-бэкенда, которого пока
+нет — он расписан по шагам с выверенными сигнатурами в
+[`docs/ROADMAP.md`](docs/ROADMAP.md). Сейчас работает nested-режим (окно поверх
+любой сессии) и CPU-превью оболочки; всё остальное — из ROADMAP.
+
 ## FAQ · горячие клавиши
 
 | Клавиша | Что делает |

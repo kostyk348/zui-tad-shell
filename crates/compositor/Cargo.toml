@@ -34,4 +34,4 @@ smithay = { workspace = true, optional = true }
 wayland-server = { workspace = true, optional = true }
 wayland-protocols = { version = "0.32", optional = true }
 tracing-subscriber = { workspace = true, optional = true }
-winit = { workspace = true, optional = true, default-features = false, features = ["wayland", "wayland-dlopen", "x11", "rwh_06"] }
+winit = { workspace = true, optional = true, features = ["wayland", "wayland-dlopen", "x11", "rwh_06"] }

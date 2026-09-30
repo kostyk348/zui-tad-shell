@@ -8,6 +8,8 @@
 //! Крейт полностью CPU-рендер (tiny-skia) и не знает про Wayland — поэтому
 //! панель/OSD/лок можно снять в PNG и посмотреть, а логику покрыть тестами.
 
+#![allow(clippy::too_many_arguments)] // рисующие функции принимают много параметров осознанно
+
 pub mod bg;
 pub mod config;
 pub mod demo;

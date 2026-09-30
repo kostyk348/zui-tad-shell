@@ -1,67 +1,43 @@
-#!/bin/bash
-# install.sh — системная установка ZUI-TAD Shell как DE
-# Запускать: sudo ./install.sh
-
+#!/bin/sh
+# Установка ZUI-TAD: бинари, сессия для DM, ассеты.
+# Запуск: sudo ./install.sh   (или ./install.sh --user для ~/.local)
 set -e
+cd "$(dirname "$0")"
 
-PREFIX="${PREFIX:-/usr/local}"
-BINDIR="$PREFIX/bin"
-SESSIONDIR_WAYLAND="/usr/share/wayland-sessions"
-SESSIONDIR_X="/usr/share/xsessions"
-DATADIR="$PREFIX/share/zui-tad-shell"
-APPDIR="/usr/share/applications"
+if [ "$1" = "--user" ]; then
+    BIN="$HOME/.local/bin"; SHARE="$HOME/.local/share"
+else
+    BIN="/usr/local/bin"; SHARE="/usr/local/share"
+fi
 
-echo "==> Сборка release..."
-cargo build --release
+echo "== сборка =="
+cargo build --release -p phosphor --bins
+cargo build --release -p compositor --features smithay --bin zui-compositor
 
-echo "==> Установка бинарников в $BINDIR/"
-install -Dm755 target/release/zui-tad-shell     "$BINDIR/zui-tad-shell"
-install -Dm755 target/release/render_screenshot "$BINDIR/zui-tad-shell-screenshot"
-install -Dm755 target/release/init_demo         "$BINDIR/zui-tad-shell-init-demo"
+echo "== бинари -> $BIN =="
+mkdir -p "$BIN"
+install -m755 target/release/zui-compositor "$BIN/zui-compositor"
+install -m755 target/release/zui-preview "$BIN/zui-tad-preview"
+install -m755 target/release/shell_shot "$BIN/zui-tad-shot"
+install -m755 target/release/gen_bg "$BIN/zui-tad-genbg"
+install -m755 assets/zui-tad-session.sh "$BIN/zui-tad-session"
 
-echo "==> Установка данных в $DATADIR/"
-install -Dm644 README.md       "$DATADIR/README.md"
-install -Dm644 LICENSE         "$DATADIR/LICENSE" 2>/dev/null || true
-cp -r assets/fonts             "$DATADIR/fonts/"
+echo "== ассеты -> $SHARE/zui-tad =="
+mkdir -p "$SHARE/zui-tad/backgrounds"
+install -m644 assets/backgrounds/*.png "$SHARE/zui-tad/backgrounds/"
 
-echo "==> Установка сессии для дисплейного менеджера..."
-install -Dm755 assets/zui-tad-shell-session.sh "$BINDIR/zui-tad-shell-session"
-install -Dm644 assets/zui-tad-shell.desktop    "$SESSIONDIR_WAYLAND/zui-tad-shell.desktop"
-install -Dm644 assets/zui-tad-shell.desktop    "$SESSIONDIR_X/zui-tad-shell.desktop"
+echo "== сессии для DM =="
+if [ "$1" = "--user" ]; then
+    mkdir -p "$HOME/.local/share/wayland-sessions" "$HOME/.local/share/xsessions"
+    install -m644 assets/zui-tad.desktop "$HOME/.local/share/wayland-sessions/zui-tad.desktop"
+    install -m644 assets/zui-tad.desktop "$HOME/.local/share/xsessions/zui-tad.desktop"
+else
+    install -Dm644 assets/zui-tad.desktop /usr/share/wayland-sessions/zui-tad.desktop
+    install -Dm644 assets/zui-tad.desktop /usr/share/xsessions/zui-tad.desktop
+fi
 
-echo "==> Установка .desktop файла для launcher..."
-install -Dm644 assets/zui-tad-shell.desktop    "$APPDIR/zui-tad-shell.desktop"
-
-echo "==> Обновление кеша шрифтов..."
-fc-cache -f >/dev/null 2>&1 || true
-
-echo ""
-echo "================================================"
-echo " Готово! ZUI-TAD Shell установлен как DE."
-echo "================================================"
-echo ""
-echo "Способы запуска:"
-echo ""
-echo "  1. Из логин-экрана (GDM/SDDM/LightDM):"
-echo "     Выйдите из текущей сессии, выберите 'ZUI-TAD Shell'"
-echo ""
-echo "  2. Как отдельное приложение внутри текущей DE:"
-echo "     zui-tad-shell"
-echo ""
-echo "  3. С явным запуском композитора:"
-echo "     zui-tad-shell --compositor"
-echo ""
-echo "Горячие клавиши DE:"
-echo "  Ctrl+1-9         Workspace switch"
-echo "  Ctrl+Shift+1-9   Move window to workspace"
-echo "  Ctrl+Space       App launcher"
-echo "  Ctrl+T/B/Shift+E/F — Terminal/Browser/Editor/Files"
-echo "  Ctrl+Z/Y         Undo/Redo"
-echo "  F1               Help"
-echo "  F12              Screenshot"
-echo ""
-echo "Для deинсталляции:"
-echo "  rm $BINDIR/zui-tad-shell $BINDIR/zui-tad-shell-session $BINDIR/zui-tad-shell-*"
-echo "  rm -r $DATADIR"
-echo "  rm $SESSIONDIR_WAYLAND/zui-tad-shell.desktop $SESSIONDIR_X/zui-tad-shell.desktop"
-echo "  rm $APPDIR/zui-tad-shell.desktop"
+echo
+echo "готово. Проверка готовности:  zui-compositor --check"
+echo "Nested-режим сразу:           zui-compositor"
+echo "Живое превью оболочки:        zui-tad-preview"
+echo "Сессия: выберите ZUI-TAD на экране входа (или запустите из TTY)."

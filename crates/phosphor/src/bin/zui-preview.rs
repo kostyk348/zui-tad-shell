@@ -36,7 +36,6 @@ use phosphor::fx::{crt, CrtParams};
 use phosphor::hud::{self, Ecg, Toast};
 use phosphor::menu::{self, Action, MenuState, ThemeId};
 use phosphor::panel::{draw_top_panel, PanelData};
-use phosphor::texture::{texture, TexKind};
 use phosphor::theme::{Metrics, Mode as ThemeMode, Palette};
 use phosphor::widgets::Fonts;
 use tiny_skia::Pixmap;
@@ -52,8 +51,6 @@ const RESIZE_MARGIN_PX: f32 = 9.0;
 const MIN_WINDOW: Vector2<f32> = Vector2::new(120.0, 80.0);
 /// Бюджет кадра при 60 fps.
 const FRAME_BUDGET_MS: f32 = 16.6;
-/// Ниже этого среднего — возвращаем полные эффекты.
-const FRAME_COMFORT_MS: f32 = 9.0;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum Quality {

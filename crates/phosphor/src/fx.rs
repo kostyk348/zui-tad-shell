@@ -135,7 +135,7 @@ pub fn crt(pm: &mut Pixmap, p: &CrtParams) {
             s.spawn(move || {
                 let q = (levels.max(2) - 1) as f32;
                 let keep = 1.0 - scanline.clamp(0.0, 1.0);
-                let quant = levels >= 2 && levels < 255;
+                let quant = (2..255).contains(&levels);
                 for (r, row) in band.chunks_mut(w).enumerate() {
                     let y = y0 + r;
                     let dark = scanline > 0.0 && (y as u32) % period == 1;

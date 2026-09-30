@@ -373,7 +373,7 @@ impl Scene {
                 continue;
             }
             let score = primary + ortho * 2.0;
-            if best.map_or(true, |(s, _)| score < s) {
+            if best.is_none_or(|(s, _)| score < s) {
                 best = Some((score, w.id));
             }
         }
@@ -528,7 +528,7 @@ impl Scene {
                     continue;
                 }
                 let score = primary + ortho * 2.0;
-                if best.map_or(true, |(s, _)| score < s) {
+                if best.is_none_or(|(s, _)| score < s) {
                     best = Some((score, *p));
                 }
             }
@@ -581,12 +581,12 @@ impl Scene {
             let oy2 = oy1 + oh;
 
             for d in [ox1 - x1, ox2 - x2, ox2 - x1, ox1 - x2] {
-                if d.abs() <= threshold && best_dx.map_or(true, |b| d.abs() < b.abs()) {
+                if d.abs() <= threshold && best_dx.is_none_or(|b| d.abs() < b.abs()) {
                     best_dx = Some(d);
                 }
             }
             for d in [oy1 - y1, oy2 - y2, oy2 - y1, oy1 - y2] {
-                if d.abs() <= threshold && best_dy.map_or(true, |b| d.abs() < b.abs()) {
+                if d.abs() <= threshold && best_dy.is_none_or(|b| d.abs() < b.abs()) {
                     best_dy = Some(d);
                 }
             }

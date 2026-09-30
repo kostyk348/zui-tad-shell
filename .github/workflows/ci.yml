@@ -19,6 +19,8 @@ jobs:
         run: cargo fmt --all -- --check
       - name: tests (canvas-engine + phosphor)
         run: cargo test -p canvas-engine -p phosphor
+      - name: clippy (продуктовые крейты, без предупреждений)
+        run: cargo clippy -p canvas-engine -p phosphor --all-targets
       - name: release build (shell binaries)
         run: cargo build --release -p phosphor --bins
       - name: сгенерировать обои (проверка, что генератор живой)
@@ -41,3 +43,5 @@ jobs:
         run: cargo check -p compositor --features smithay --bins
       - name: tests (оболочка композитора: меню/клики/клавиши)
         run: cargo test -p compositor --features smithay
+      - name: clippy (композитор)
+        run: cargo clippy -p compositor --features smithay --bins

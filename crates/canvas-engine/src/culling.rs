@@ -31,7 +31,7 @@ pub struct ScreenRect {
 }
 
 /// Главная функция: фильтрует и классифицирует VO.
-pub fn cull<'a>(camera: &Camera, vos: &'a [VirtualObject]) -> Vec<CulledVo> {
+pub fn cull(camera: &Camera, vos: &[VirtualObject]) -> Vec<CulledVo> {
     let view = camera.view_aabb_world();
     let mut out = Vec::with_capacity(64);
 
