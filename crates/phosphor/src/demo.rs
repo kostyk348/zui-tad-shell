@@ -21,11 +21,7 @@ pub enum WinState {
 }
 
 pub fn fill(pm: &mut Pixmap, c: [u8; 4]) {
-    let mut p = Paint::default();
-    p.set_color_rgba8(c[0], c[1], c[2], c[3]);
-    if let Some(r) = Rect::from_xywh(0.0, 0.0, pm.width() as f32, pm.height() as f32) {
-        pm.fill_rect(r, &p, Transform::identity(), None);
-    }
+    crate::blit::fill(pm, c);
 }
 
 pub fn with_alpha(c: [u8; 4], a: u8) -> [u8; 4] {

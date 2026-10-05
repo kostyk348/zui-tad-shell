@@ -11,6 +11,7 @@
 #![allow(clippy::too_many_arguments)] // рисующие функции принимают много параметров осознанно
 
 pub mod bg;
+pub mod blit;
 pub mod config;
 pub mod demo;
 pub mod fx;

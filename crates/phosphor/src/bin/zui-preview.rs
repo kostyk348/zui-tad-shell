@@ -35,7 +35,7 @@ use phosphor::demo::{self, WinState};
 use phosphor::fx::{crt, CrtParams};
 use phosphor::hud::{self, Ecg, Toast};
 use phosphor::menu::{self, Action, MenuState, ThemeId};
-use phosphor::panel::{draw_top_panel, PanelData};
+use phosphor::panel::{draw_top_panel, hint_bar, PanelData};
 use phosphor::theme::{Metrics, Mode as ThemeMode, Palette};
 use phosphor::widgets::Fonts;
 use tiny_skia::Pixmap;
@@ -51,6 +51,8 @@ const RESIZE_MARGIN_PX: f32 = 9.0;
 const MIN_WINDOW: Vector2<f32> = Vector2::new(120.0, 80.0);
 /// Бюджет кадра при 60 fps.
 const FRAME_BUDGET_MS: f32 = 16.6;
+/// Бюджет кэша растров карточек окон (держим мегабайты, а не «64 штуки»).
+const CARD_CACHE_BYTES: usize = 12 * 1024 * 1024;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum Quality {
@@ -98,7 +100,17 @@ struct App {
     // производительность
     frame_ms: Vec<f32>,
     render_mode: &'static str,
-    card_cache: HashMap<(u64, u32, u32, u8), Pixmap>,
+    card_cache: HashMap<(u64, u32, u32, u8), (Pixmap, u64)>,
+    card_cache_bytes: usize,
+    /// Кадровый буфер переиспользуется: не аллоцируем 5.8 МБ каждый кадр.
+    frame_buf: Option<Pixmap>,
+    frame_counter: u64,
+    /// Кэш «хрома»: верхняя панель и нижняя строка подсказок.
+    /// Они меняются раз в секунду/по событию, а растеризация текста —
+    /// самая дорогая часть кадра (замер: compose ~10 мс из 14).
+    chrome: Option<(Pixmap, Pixmap, u64)>,
+    /// Подфазы compose для телеметрии (мс).
+    sub: [f32; 5],
     bg_kind: Option<BgKind>,
     bg_wallpaper: Option<String>,
     backdrop: Option<(Pixmap, (u32, u32))>,
@@ -237,6 +249,11 @@ impl App {
             frame_ms: Vec::with_capacity(120),
             render_mode: "RICH",
             card_cache: HashMap::new(),
+            card_cache_bytes: 0,
+            frame_buf: None,
+            frame_counter: 0,
+            chrome: None,
+            sub: [0.0; 5],
             bg_kind,
             bg_wallpaper,
             backdrop: None,
@@ -344,14 +361,8 @@ impl App {
         };
         let ox = (-self.camera.center.x * 0.12).clamp(-(w as f32) * 0.5, 0.0);
         let oy = (-self.camera.center.y * 0.12).clamp(-(h as f32) * 0.5, 0.0);
-        pm.draw_pixmap(
-            ox.round() as i32,
-            oy.round() as i32,
-            layer.as_ref(),
-            &tiny_skia::PixmapPaint::default(),
-            tiny_skia::Transform::identity(),
-            None,
-        );
+        // Подложка непрозрачна → обычное копирование строк вместо SourceOver.
+        phosphor::blit::blit(pm, layer, ox.round() as i32, oy.round() as i32);
     }
 
     fn avg_frame_ms(&self) -> f32 {
@@ -485,6 +496,7 @@ impl App {
             Action::SetTheme(t) => {
                 self.mode = t.mode();
                 self.card_cache.clear();
+                self.card_cache_bytes = 0;
                 self.backdrop = None;
                 self.toast = Some(Toast::new("theme", t.label()));
                 self.set_osd("theme", 0.5, t.label().into());
@@ -503,6 +515,7 @@ impl App {
             Action::QualityRich => {
                 self.quality = Quality::Rich;
                 self.card_cache.clear();
+                self.card_cache_bytes = 0;
             }
             Action::QualityLean => self.quality = Quality::Lean,
             Action::Help => self.help = true,
@@ -667,21 +680,24 @@ impl App {
 
     // ---------------- кадр ----------------
 
-    fn compose(&mut self) -> Pixmap {
+    /// Нарисовать кадр в ПЕРЕДАННЫЙ буфер (CRT — отдельная фаза, см. RedrawRequested).
+    fn compose_into(&mut self, pm: &mut Pixmap) {
         let (w, h) = self.size;
+        self.frame_counter = self.frame_counter.wrapping_add(1);
         let pal = self.palette();
         let m = self.metrics;
-        let rich = self.rich();
         let Some(fonts) = self.fonts.take() else {
-            let mut pm = Pixmap::new(w, h).unwrap();
-            demo::fill(&mut pm, pal.bg);
-            return pm;
+            demo::fill(pm, pal.bg);
+            return;
         };
 
-        let mut pm = Pixmap::new(w, h).unwrap();
-        demo::fill(&mut pm, pal.bg);
-        self.draw_backdrop(&mut pm);
-        demo::canvas_grid_camera(&mut pm, &pal, &self.camera, 64.0);
+        let ts = Instant::now();
+        demo::fill(pm, pal.bg);
+        self.draw_backdrop(pm);
+        self.sub[0] = ts.elapsed().as_secs_f32() * 1000.0;
+        let ts = Instant::now();
+        demo::canvas_grid_camera(pm, &pal, &self.camera, 64.0);
+        self.sub[1] = ts.elapsed().as_secs_f32() * 1000.0;
 
         let quads = layout_windows(&self.scene, &self.camera, self.camera.viewport);
         let focus = self.scene.focus();
@@ -702,14 +718,12 @@ impl App {
             } else {
                 mock.state
             };
-            let cw = q.quad.w.max(8.0).round() as u32;
-            let ch = q.quad.h.max(8.0).round() as u32;
+            let cw = ((q.quad.w.max(8.0) / 8.0).round() * 8.0) as u32;
+            let ch = ((q.quad.h.max(8.0) / 8.0).round() * 8.0) as u32;
             let key = (q.id, cw, ch, state as u8);
+            let now = self.frame_counter;
             if !self.card_cache.contains_key(&key) {
-                if self.card_cache.len() > 64 {
-                    self.card_cache.clear();
-                }
-                let mut card = Pixmap::new(cw.max(1), ch.max(1)).unwrap();
+                let mut card = Pixmap::new(cw.max(8), ch.max(8)).unwrap();
                 demo::window_card(
                     &mut card,
                     &fonts,
@@ -720,17 +734,31 @@ impl App {
                     mock.app,
                     state,
                 );
-                self.card_cache.insert(key, card);
+                let sz = cw as usize * ch as usize * 4;
+                // Бюджет по байтам: вытесняем самые давно не использованные.
+                while self.card_cache_bytes + sz > CARD_CACHE_BYTES && !self.card_cache.is_empty() {
+                    let victim = self
+                        .card_cache
+                        .iter()
+                        .min_by_key(|(_, (_, used))| *used)
+                        .map(|(k, _)| *k);
+                    match victim {
+                        Some(k) => {
+                            if let Some((old, _)) = self.card_cache.remove(&k) {
+                                self.card_cache_bytes = self.card_cache_bytes.saturating_sub(
+                                    old.width() as usize * old.height() as usize * 4,
+                                );
+                            }
+                        }
+                        None => break,
+                    }
+                }
+                self.card_cache_bytes += sz;
+                self.card_cache.insert(key, (card, now));
             }
-            if let Some(card) = self.card_cache.get(&key) {
-                pm.draw_pixmap(
-                    q.quad.x.round() as i32,
-                    q.quad.y.round() as i32,
-                    card.as_ref(),
-                    &tiny_skia::PixmapPaint::default(),
-                    tiny_skia::Transform::identity(),
-                    None,
-                );
+            if let Some((card, used)) = self.card_cache.get_mut(&key) {
+                *used = now;
+                phosphor::blit::blit(pm, card, q.quad.x.round() as i32, q.quad.y.round() as i32);
             }
             if self.scene.get(q.id).and_then(|win| win.cluster).is_some() {
                 cluster_bbox = Some(match cluster_bbox {
@@ -753,12 +781,12 @@ impl App {
                 .next()
                 .map(|v| v.len())
                 .unwrap_or(2);
-            demo::cluster_bracket(&mut pm, &fonts, &pal, &m, (bx, by, bw, bh), n);
+            demo::cluster_bracket(pm, &fonts, &pal, &m, (bx, by, bw, bh), n);
         }
         for q in &quads {
             if q.pinned && self.mocks.contains_key(&q.id) {
                 demo::pip_card(
-                    &mut pm,
+                    pm,
                     &fonts,
                     &pal,
                     &m,
@@ -767,34 +795,11 @@ impl App {
             }
         }
 
-        // Панель + HUD
-        let clock = chrono::Local::now();
-        let _ = draw_top_panel(
-            &mut pm,
-            w as f32,
-            &fonts,
-            &PanelData {
-                title: "zui-tad",
-                workspace: 3,
-                canvas_pos: (self.camera.center.x, self.camera.center.y),
-                zoom: self.camera.zoom,
-                windows: self.scene.len(),
-                clock: &clock.format("%H:%M").to_string(),
-                date: &clock.format("%d %b").to_string().to_uppercase(),
-                meters: [
-                    (
-                        "cpu",
-                        (self.avg_frame_ms() / FRAME_BUDGET_MS).clamp(0.0, 1.0),
-                        self.avg_frame_ms() > FRAME_BUDGET_MS,
-                    ),
-                    ("ram", 0.62, false),
-                    ("vol", 0.80, false),
-                    ("bat", 0.12, true),
-                ],
-            },
-            &pal,
-            &m,
-        );
+        self.sub[2] = ts.elapsed().as_secs_f32() * 1000.0; // карточки окон
+        let ts = Instant::now();
+        // Панель и строка подсказок — из кэша (растеризация текста дорога).
+        self.draw_chrome(pm, &fonts);
+        self.sub[3] = ts.elapsed().as_secs_f32() * 1000.0;
 
         let t = self.started.elapsed().as_secs_f32();
         self.ecg.push_beat(t, 64.0);
@@ -842,7 +847,7 @@ impl App {
                 vh,
             );
             hud::minimap(
-                &mut pm,
+                pm,
                 &fonts,
                 &pal,
                 &m,
@@ -851,7 +856,7 @@ impl App {
                 &wins,
                 vp,
             );
-            hud::viewport_frame(&mut pm, &pal, &m);
+            hud::viewport_frame(pm, &pal, &m);
         }
 
         // Модуль телеметрии + виталы (в focus mode прячем, оставляем только панель и подсказку)
@@ -863,7 +868,7 @@ impl App {
                 (h as f32) - module_h - 24.0
             };
             demo::telemetry_module(
-                &mut pm,
+                pm,
                 &fonts,
                 &pal,
                 &m,
@@ -883,7 +888,7 @@ impl App {
             );
             if self.vitals_on && self.hud_on {
                 hud::vitals(
-                    &mut pm,
+                    pm,
                     &fonts,
                     &pal,
                     &m,
@@ -902,7 +907,7 @@ impl App {
                     let sq = canvas_to_screen(&self.camera, win.pos);
                     let app = self.mocks.get(&id).map(|mk| mk.app).unwrap_or("window");
                     hud::window_hud(
-                        &mut pm,
+                        pm,
                         &fonts,
                         &pal,
                         &m,
@@ -920,8 +925,8 @@ impl App {
             }
         }
 
-        if self.beam_on && rich {
-            hud::scan_beam(&mut pm, &pal, (t % 7.0) / 7.0);
+        if self.beam_on && self.rich() {
+            hud::scan_beam(pm, &pal, (t % 7.0) / 7.0);
         }
 
         // Нижняя строка подсказок: шелл должен объяснять себя сам.
@@ -933,28 +938,18 @@ impl App {
             } else {
                 ": меню · ? справка · L лаунчер · W overview · M fit · S suspend · TAB окна · F2 HUD · F3 focus · 1/2/3 тема"
             };
-            phosphor::panel::hint_bar(
-                &mut pm,
-                &fonts,
-                &pal,
-                &m,
-                w as f32,
-                h as f32,
-                hint,
-                &format!("{:.0} FPS · {}", self.last_fps, self.render_mode),
-            );
         }
 
         if let Some(t) = &self.toast {
             if t.alive() {
-                let _ = hud::toast(&mut pm, &fonts, &pal, &m, w as f32, 40.0, t);
+                let _ = hud::toast(pm, &fonts, &pal, &m, w as f32, 40.0, t);
             }
         }
 
         if self.launcher {
             let lw = 560.0;
             demo::launcher_overlay(
-                &mut pm,
+                pm,
                 &fonts,
                 &pal,
                 &m,
@@ -970,41 +965,117 @@ impl App {
                 ],
             );
         }
-        if let Some(st) = self.menu.clone() {
-            let _ = menu::draw(&mut pm, &fonts, &pal, &m, w as f32, h as f32, &st);
+        if let Some(st) = &self.menu {
+            let _ = menu::draw(pm, &fonts, &pal, &m, w as f32, h as f32, st);
         }
         if self.help {
             let rows = menu::help_rows();
-            menu::draw_help(&mut pm, &fonts, &pal, &m, w as f32, h as f32, &rows);
+            menu::draw_help(pm, &fonts, &pal, &m, w as f32, h as f32, &rows);
         }
-        if let Some((label, value, text, at)) = self.osd.clone() {
-            if at.elapsed() < Duration::from_millis(2500) {
+        let osd_fresh = self
+            .osd
+            .as_ref()
+            .map(|(_, _, _, at)| at.elapsed() < Duration::from_millis(2500))
+            .unwrap_or(false);
+        if osd_fresh {
+            if let Some((label, value, text, _)) = &self.osd {
                 let _ = phosphor::draw_osd(
-                    &mut pm, w as f32, h as f32, &label, value, &text, &fonts, &pal, &m,
+                    pm, w as f32, h as f32, label, *value, text, &fonts, &pal, &m,
                 );
-            } else {
-                self.osd = None;
             }
+        } else if self.osd.is_some() {
+            self.osd = None;
         }
 
-        // Фосфор: в lean-режиме оставляем только сканлайны (без зерна/дизеринга).
-        let mut params = CrtParams::from_palette(&pal, 1337);
-        if !rich {
-            params.grain = 0.0;
-            params.dither_levels = 255;
-            params.chroma = 0.0;
-            self.render_mode = "LEAN";
-        } else {
-            params.grain = pal.grain * 0.6;
-            self.render_mode = match self.quality {
-                Quality::Auto => "AUTO·RICH",
-                Quality::Rich => "RICH",
-                Quality::Lean => "LEAN",
-            };
-        }
-        crt(&mut pm, &params);
+        self.sub[4] = ts.elapsed().as_secs_f32() * 1000.0; // HUD (миникарта/виталы/рамка)
         self.fonts = Some(fonts);
-        pm
+    }
+
+    /// Верхняя панель + нижняя строка: кэшируем полосы, накладываем копией.
+    fn draw_chrome(&mut self, pm: &mut Pixmap, fonts: &Fonts) {
+        let (w, h) = self.size;
+        let pal = self.palette();
+        let m = self.metrics;
+        let clock = chrono::Local::now();
+        let clusters = self.scene.clusters().len();
+        let suspended = self.scene.windows().iter().filter(|x| x.suspended).count();
+        let hint = if self.menu.is_some() {
+            ": фильтр · ↑↓ выбор · ENTER выполнить · ESC закрыть"
+        } else if self.help {
+            "ESC — вернуться"
+        } else {
+            ": меню · ? справка · L лаунчер · W overview · M fit · S suspend · TAB окна · F2 HUD · F3 focus · 1/2/3 тема"
+        };
+        let right = format!("{:.0} FPS · {}", self.last_fps, self.render_mode);
+        // Ключ: всё, что реально печатается в полосах. Мс округляем до 1 мс,
+        // чтобы панель не пересобиралась каждый кадр.
+        let key = {
+            use std::hash::{Hash, Hasher};
+            let mut hasher = std::collections::hash_map::DefaultHasher::new();
+            w.hash(&mut hasher);
+            (self.mode as u8).hash(&mut hasher);
+            clock.format("%H:%M").to_string().hash(&mut hasher);
+            self.render_mode.hash(&mut hasher);
+            (self.avg_frame_ms() as u32).hash(&mut hasher);
+            self.scene.len().hash(&mut hasher);
+            clusters.hash(&mut hasher);
+            suspended.hash(&mut hasher);
+            ((self.camera.center.x / 8.0) as i32).hash(&mut hasher);
+            ((self.camera.center.y / 8.0) as i32).hash(&mut hasher);
+            ((self.camera.zoom * 20.0) as i32).hash(&mut hasher);
+            self.hud_on.hash(&mut hasher);
+            self.focus_mode.hash(&mut hasher);
+            self.menu.is_some().hash(&mut hasher);
+            self.help.hash(&mut hasher);
+            hasher.finish()
+        };
+        if self.chrome.as_ref().map(|(_, _, k)| *k) != Some(key) {
+            let panel_h = m.panel_h.max(1.0) as u32;
+            let bar_h = 18u32;
+            let mut top = Pixmap::new(w.max(1), panel_h).unwrap();
+            let _ = draw_top_panel(
+                &mut top,
+                w as f32,
+                fonts,
+                &PanelData {
+                    title: "zui-tad",
+                    workspace: 3,
+                    canvas_pos: (self.camera.center.x, self.camera.center.y),
+                    zoom: self.camera.zoom,
+                    windows: self.scene.len(),
+                    clock: &clock.format("%H:%M").to_string(),
+                    date: &clock.format("%d %b").to_string().to_uppercase(),
+                    meters: [
+                        (
+                            "cpu",
+                            (self.avg_frame_ms() / FRAME_BUDGET_MS).clamp(0.0, 1.0),
+                            self.avg_frame_ms() > FRAME_BUDGET_MS,
+                        ),
+                        ("ram", 0.62, false),
+                        ("vol", 0.80, false),
+                        ("bat", 0.12, true),
+                    ],
+                },
+                &pal,
+                &m,
+            );
+            let mut bottom = Pixmap::new(w.max(1), bar_h).unwrap();
+            hint_bar(
+                &mut bottom,
+                fonts,
+                &pal,
+                &m,
+                w as f32,
+                bar_h as f32,
+                hint,
+                &right,
+            );
+            self.chrome = Some((top, bottom, key));
+        }
+        if let Some((top, bottom, _)) = &self.chrome {
+            phosphor::blit::blit(pm, top, 0, 0);
+            phosphor::blit::blit(pm, bottom, 0, (h as i32) - bottom.height() as i32);
+        }
     }
 
     fn blit(&mut self, pm: &Pixmap) {
@@ -1110,6 +1181,7 @@ impl ApplicationHandler for App {
                 self.size = (size.width.max(2), size.height.max(2));
                 self.camera.viewport = Vector2::new(self.size.0, self.size.1);
                 self.card_cache.clear();
+                self.card_cache_bytes = 0;
                 self.backdrop = None;
             }
             WindowEvent::ModifiersChanged(mods) => self.mods = mods.state(),
@@ -1153,8 +1225,40 @@ impl ApplicationHandler for App {
             }
             WindowEvent::RedrawRequested => {
                 let t0 = Instant::now();
-                let pm = self.compose();
+                let (w, h) = self.size;
+                // Кадровый буфер переиспользуем (было: аллокация 5.8 МБ каждый кадр).
+                let mut pm = match self.frame_buf.take() {
+                    Some(p) if p.width() == w && p.height() == h => p,
+                    _ => Pixmap::new(w, h).unwrap(),
+                };
+                self.compose_into(&mut pm);
+                let t_compose = t0.elapsed().as_secs_f32() * 1000.0;
+
+                // Фосфор отдельной фазой: видно, сколько стоит CRT.
+                let t1 = Instant::now();
+                let rich = self.rich();
+                let pal = self.palette();
+                let mut params = CrtParams::from_palette(&pal, 1337);
+                if !rich {
+                    params.grain = 0.0;
+                    params.dither_levels = 255;
+                    params.chroma = 0.0;
+                    self.render_mode = "LEAN";
+                } else {
+                    params.grain = pal.grain * 0.6;
+                    self.render_mode = match self.quality {
+                        Quality::Auto => "AUTO·RICH",
+                        Quality::Rich => "RICH",
+                        Quality::Lean => "LEAN",
+                    };
+                }
+                crt(&mut pm, &params);
+                let t_crt = t1.elapsed().as_secs_f32() * 1000.0;
+
+                let t2 = Instant::now();
                 self.blit(&pm);
+                let t_blit = t2.elapsed().as_secs_f32() * 1000.0;
+                self.frame_buf = Some(pm);
                 let ms = t0.elapsed().as_secs_f32() * 1000.0;
                 if self.frame_ms.len() >= 120 {
                     self.frame_ms.remove(0);
@@ -1165,12 +1269,18 @@ impl ApplicationHandler for App {
                     let fps = self.frames as f32 / self.fps_t.elapsed().as_secs_f32();
                     self.last_fps = fps;
                     println!(
-                        "zui-preview: {fps:.0} fps · frame {:.1}ms (avg {:.1}) · {} · theme={:?} · windows={}",
+                        "zui-preview: {fps:.0} fps · frame {:.1}ms = compose {:.1} [bg {:.1} grid {:.1} cards {:.1} chrome {:.1} hud {:.1}] + crt {:.1} + blit {:.1} · {} · RSS {} МБ",
                         ms,
-                        self.avg_frame_ms(),
+                        t_compose,
+                        self.sub[0],
+                        self.sub[1],
+                        self.sub[2],
+                        self.sub[3],
+                        self.sub[4],
+                        t_crt,
+                        t_blit,
                         self.render_mode,
-                        self.mode,
-                        self.scene.len()
+                        rss_mb()
                     );
                     self.frames = 0;
                     self.fps_t = Instant::now();
@@ -1190,6 +1300,20 @@ impl ApplicationHandler for App {
         }
         event_loop.set_control_flow(ControlFlow::WaitUntil(due.max(now)));
     }
+}
+
+/// Текущий RSS процесса в МБ (для телеметрии в логе).
+fn rss_mb() -> u64 {
+    std::fs::read_to_string("/proc/self/status")
+        .ok()
+        .and_then(|s| {
+            s.lines()
+                .find(|l| l.starts_with("VmRSS:"))
+                .and_then(|l| l.split_whitespace().nth(1))
+                .and_then(|v| v.parse::<u64>().ok())
+        })
+        .map(|kb| kb / 1024)
+        .unwrap_or(0)
 }
 
 fn main() -> anyhow::Result<()> {

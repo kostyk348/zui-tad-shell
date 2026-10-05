@@ -118,9 +118,9 @@ pub fn crt(pm: &mut Pixmap, p: &CrtParams) {
     let bands = band_count(h);
     let band_h = h.div_ceil(bands);
 
-    // --- проход 1 (ФУЗИЯ): дизеринг → сканлайны → виньетка → зерно ----------
-    // Все четыре — локальные по пикселю, поэтому идут в одном проходе по памяти
-    // (было три прохода — стало два: экономия ~трети трафика кадра).
+    // Проход 1: дизеринг -> сканлайны -> виньетка -> зерно.
+    // Работаем по СЫРЫМ байтам: обёртки demultiply/from_rgba на каждый пиксель
+    // стоили дороже самой математики (кадр всегда непрозрачен, alpha не трогаем).
     let (scanline, period, levels) = (p.scanline, p.scanline_period.max(1), p.dither_levels);
     let (vig, grain) = (p.vignette, p.grain);
     let (cx, cy) = (w as f32 * 0.5, h as f32 * 0.5);
@@ -128,80 +128,77 @@ pub fn crt(pm: &mut Pixmap, p: &CrtParams) {
     let amp = grain.clamp(0.0, 1.0) * 255.0;
     let tile = noise_tile();
     let off = (p.seed as usize) & 0xff;
-    let pixels = pm.pixels_mut();
-    std::thread::scope(|s| {
-        for (bi, band) in pixels.chunks_mut(band_h * w).enumerate() {
-            let y0 = bi * band_h;
-            s.spawn(move || {
-                let q = (levels.max(2) - 1) as f32;
-                let keep = 1.0 - scanline.clamp(0.0, 1.0);
-                let quant = (2..255).contains(&levels);
-                for (r, row) in band.chunks_mut(w).enumerate() {
-                    let y = y0 + r;
-                    let dark = scanline > 0.0 && (y as u32) % period == 1;
-                    let dy = y as f32 - cy;
-                    for (x, px) in row.iter_mut().enumerate() {
-                        let c = px.demultiply();
-                        let (mut rr, mut gg, mut bb) =
-                            (c.red() as f32, c.green() as f32, c.blue() as f32);
-                        if quant {
-                            let t = BAYER4[y & 3][x & 3] / 16.0 - 0.5;
-                            rr = ((rr / 255.0 * q + t).round() / q).clamp(0.0, 1.0) * 255.0;
-                            gg = ((gg / 255.0 * q + t).round() / q).clamp(0.0, 1.0) * 255.0;
-                            bb = ((bb / 255.0 * q + t).round() / q).clamp(0.0, 1.0) * 255.0;
+    {
+        let data = pm.data_mut();
+        std::thread::scope(|s| {
+            for (bi, band) in data.chunks_mut(band_h * w * 4).enumerate() {
+                let y0 = bi * band_h;
+                s.spawn(move || {
+                    let q = (levels.max(2) - 1) as f32;
+                    let keep = 1.0 - scanline.clamp(0.0, 1.0);
+                    let quant = levels >= 2 && levels < 255;
+                    for (r, row) in band.chunks_mut(w * 4).enumerate() {
+                        let y = y0 + r;
+                        let dark = scanline > 0.0 && (y as u32) % period == 1;
+                        let dy = y as f32 - cy;
+                        for (x, px) in row.chunks_exact_mut(4).enumerate() {
+                            let (mut rr, mut gg, mut bb) =
+                                (px[0] as f32, px[1] as f32, px[2] as f32);
+                            if quant {
+                                let t = BAYER4[y & 3][x & 3] / 16.0 - 0.5;
+                                rr = ((rr / 255.0 * q + t).round() / q).clamp(0.0, 1.0) * 255.0;
+                                gg = ((gg / 255.0 * q + t).round() / q).clamp(0.0, 1.0) * 255.0;
+                                bb = ((bb / 255.0 * q + t).round() / q).clamp(0.0, 1.0) * 255.0;
+                            }
+                            if dark {
+                                rr *= keep;
+                                gg *= keep;
+                                bb *= keep;
+                            }
+                            if vig > 0.0 {
+                                let dx = x as f32 - cx;
+                                let fac = (1.0
+                                    - vig.clamp(0.0, 1.0) * (dx * dx + dy * dy) / max_r2)
+                                    .clamp(0.0, 1.0);
+                                rr *= fac;
+                                gg *= fac;
+                                bb *= fac;
+                            }
+                            if amp > 0.0 {
+                                let n =
+                                    tile[((y & 255) << 8) | ((x + off) & 255)] as f32 / 255.0 - 0.5;
+                                rr += n * amp;
+                                gg += n * amp;
+                                bb += n * amp;
+                            }
+                            px[0] = rr.clamp(0.0, 255.0) as u8;
+                            px[1] = gg.clamp(0.0, 255.0) as u8;
+                            px[2] = bb.clamp(0.0, 255.0) as u8;
                         }
-                        if dark {
-                            rr *= keep;
-                            gg *= keep;
-                            bb *= keep;
-                        }
-                        if vig > 0.0 {
-                            let dx = x as f32 - cx;
-                            let fac = (1.0 - vig.clamp(0.0, 1.0) * (dx * dx + dy * dy) / max_r2)
-                                .clamp(0.0, 1.0);
-                            rr *= fac;
-                            gg *= fac;
-                            bb *= fac;
-                        }
-                        if amp > 0.0 {
-                            let n = tile[((y & 255) << 8) | ((x + off) & 255)] as f32 / 255.0 - 0.5;
-                            rr += n * amp;
-                            gg += n * amp;
-                            bb += n * amp;
-                        }
-                        px_set(
-                            px,
-                            rr.clamp(0.0, 255.0) as u8,
-                            gg.clamp(0.0, 255.0) as u8,
-                            bb.clamp(0.0, 255.0) as u8,
-                        );
                     }
-                }
-            });
-        }
-    });
+                });
+            }
+        });
+    }
 
-    // --- проход 2: хроматическая аберрация (горизонтальный сдвиг R/B) -------
+    // Проход 2: хроматическая аберрация (R вправо, B влево).
     let shift = p.chroma.round() as i32;
     if shift != 0 {
-        let pixels = pm.pixels_mut();
+        let data = pm.data_mut();
         std::thread::scope(|s| {
-            for (bi, band) in pixels.chunks_mut(band_h * w).enumerate() {
+            for (bi, band) in data.chunks_mut(band_h * w * 4).enumerate() {
+                let _ = bi;
                 s.spawn(move || {
-                    let mut row_tmp: Vec<PremultipliedColorU8> =
-                        vec![PremultipliedColorU8::TRANSPARENT; w];
-                    for row in band.chunks_mut(w) {
-                        row_tmp.copy_from_slice(row);
+                    let mut tmp = vec![0u8; w * 4];
+                    for row in band.chunks_mut(w * 4) {
+                        tmp.copy_from_slice(row);
                         for x in 0..w {
-                            let xr = (x as i32 + shift).clamp(0, w as i32 - 1) as usize;
-                            let xb = (x as i32 - shift).clamp(0, w as i32 - 1) as usize;
-                            let cr = row_tmp[xr].demultiply();
-                            let cb = row_tmp[xb].demultiply();
-                            let c = row[x].demultiply();
-                            px_set(&mut row[x], cr.red(), c.green(), cb.blue());
+                            let xr = (x as i32 + shift).clamp(0, w as i32 - 1) as usize * 4;
+                            let xb = (x as i32 - shift).clamp(0, w as i32 - 1) as usize * 4;
+                            row[x * 4] = tmp[xr];
+                            row[x * 4 + 2] = tmp[xb + 2];
                         }
                     }
-                    let _ = bi;
                 });
             }
         });
