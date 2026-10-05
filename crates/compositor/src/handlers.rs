@@ -483,3 +483,9 @@ impl smithay::wayland::xdg_activation::XdgActivationHandler for CompositorState 
         let _ = self.activation.remove_token(&token);
     }
 }
+
+impl smithay::wayland::idle_notify::IdleNotifierHandler for CompositorState {
+    fn idle_notifier_state(&mut self) -> &mut smithay::wayland::idle_notify::IdleNotifierState<Self> {
+        self.idle.as_mut().expect("idle-notify не инициализирован")
+    }
+}

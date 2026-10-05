@@ -20,6 +20,7 @@ use smithay::{
         compositor::CompositorState as SmithayCompositorState,
         content_type::ContentTypeState,
         foreign_toplevel_list::{ForeignToplevelHandle, ForeignToplevelListState},
+        idle_notify::IdleNotifierState,
         output::OutputManagerState,
         seat::WaylandFocus,
         selection::{data_device::DataDeviceState, primary_selection::PrimarySelectionState},
@@ -40,6 +41,13 @@ use tad_core::{GraphStore, RoId, VirtualObject, VoId};
 use uuid::Uuid;
 
 use crate::shell::ShellLayer;
+use std::cell::RefCell;
+use std::rc::Rc;
+
+/// Графический бэкенд (winit+GLES), которым владеет calloop-цикл.
+pub type Gfx = smithay::backend::winit::WinitGraphicsBackend<
+    smithay::backend::renderer::gles::GlesRenderer,
+>;
 use crate::windows::WindowTracker;
 
 /// Per-client compositor data (required by smithay 0.5).
@@ -98,6 +106,11 @@ pub struct CompositorState {
     /// Менеджер выходов + xdg-output: нужен клиентам (grim, wlr-randr), чтобы
     /// узнать размеры выходов, а не «угадывать» их.
     pub output_manager: OutputManagerState,
+    /// idle-notify: `ext-idle-notify-v1` (таймеры вставлены в calloop-цикл).
+    pub idle: Option<IdleNotifierState<CompositorState>>,
+    /// Графический бэкенд для calloop-цикла (Rc<RefCell>, т.к. calloop даёт
+    /// только `&mut state`, а рендерер нужен снаружи состояния).
+    pub gfx: Option<Rc<RefCell<Gfx>>>,
 
     pub seat_state: SeatState<CompositorState>,
     pub seat: Seat<CompositorState>,
@@ -207,6 +220,8 @@ impl CompositorState {
             content_type,
             screencopy,
             output_manager,
+            idle: None,
+            gfx: None,
             seat_state,
             seat,
             keyboard: None,

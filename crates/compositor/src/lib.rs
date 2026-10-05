@@ -57,6 +57,8 @@ smithay::delegate_viewporter!(CompositorState);
 smithay::delegate_single_pixel_buffer!(CompositorState);
 #[cfg(feature = "smithay")]
 smithay::delegate_content_type!(CompositorState);
+#[cfg(feature = "smithay")]
+smithay::delegate_idle_notify!(CompositorState);
 
 /// Start Wayland compositor or explain embedded mode.
 pub fn run_compositor(store: Arc<Mutex<GraphStore>>, embedded: bool) -> Result<()> {

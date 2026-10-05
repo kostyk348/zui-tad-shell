@@ -30,6 +30,27 @@
   из drm-крейта, а smithay'ев `allocator::dumb::DumbBuffer` не имеет `map`;
   путь собран только на API drm-крейта.
 
+### Последний блок: calloop (выверенные факты для исполнителя)
+
+Факты, проверенные по исходникам (чтобы не искать заново):
+
+| Нужно | Что есть |
+|---|---|
+| winit как источник | `WinitEventLoop` **реализует `calloop::EventSource`** (`NEEDS_EXTRA_LIFECYCLE_EVENTS = true`) |
+| клиентский сокет | `smithay::wayland::socket::ListeningSocketSource::{new_auto, with_name}` — источник, отдаёт `UnixStream` |
+| диспатч Wayland | `Display` держать **внутри состояния** (канонический пример — `smithay/src/wayland/socket.rs`): callback делает `state.display.handle().insert_client(..)`; диспатч — приём «take → `dispatch_clients(&mut state)` → put back» |
+| ввод | `LibinputInputBackend` — источник; поля событий те же трейты smithay (`delta()`, `button_code()`, `state()`, `key_code()`, `amount(axis)`), что и у winit → обработчик ввода можно сделать обобщённым `handle_input<B: InputBackend>` и переиспользовать в обоих бэкендах |
+| vblank | `DrmDeviceNotifier` — источник (`DrmEvent::VBlank { crtc }`); для честного флипа нужны ДВА dumb-буфера (double buffering) |
+| idle | `IdleNotifierState::new::<CompositorState>(&dh, loop_handle)` — таймеры вставляются в этот же цикл, `notify_activity(&seat)` на ввод |
+| пуск | `event_loop.run(None, &mut state, |_| {})` |
+
+Порядок, который не ломает рабочий nested-путь:
+1. обобщённый `handle_input<B>` + переключение nested-цикла на calloop → **проверяется здесь** (kitty/X11/grim должны работать как раньше);
+2. затем DRM-сессия на том же цикле (+ libinput, + vblank с двойным буфером, + idle) → проверяется только на TTY;
+3. мультимонитор: цикл по `crtc`/коннекторам, у каждого свой `DrmSurface` и вьюпорт камеры.
+
+Старое описание блока (для контекста):
+
 Что осталось, одним блоком — **переход на calloop**:
 * vblank-синхронизация (`DrmDeviceNotifier` — calloop-источник; сейчас кадры
   идут по таймеру, возможен tearing);
