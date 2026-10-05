@@ -212,6 +212,25 @@ fn check() {
         }
     }
 
+    // 5б. X11-приложения
+    let xwl = std::process::Command::new("sh")
+        .arg("-c")
+        .arg("command -v xwayland-satellite")
+        .output()
+        .map(|o| o.status.success())
+        .unwrap_or(false);
+    if xwl {
+        line(
+            "ok",
+            "xwayland-satellite есть — X11-приложения будут работать",
+        );
+    } else {
+        line(
+            "warn",
+            "нет xwayland-satellite — только Wayland-клиенты (сборка: github.com/Supreeme/xwayland-satellite)",
+        );
+    }
+
     // 6. Конфиг и сессия
     let cfg = phosphor::config::ShellConfig::path();
     line(

@@ -18,6 +18,7 @@ use smithay::{
     utils::Serial,
     wayland::{
         compositor::CompositorState as SmithayCompositorState,
+        content_type::ContentTypeState,
         foreign_toplevel_list::{ForeignToplevelHandle, ForeignToplevelListState},
         seat::WaylandFocus,
         selection::{data_device::DataDeviceState, primary_selection::PrimarySelectionState},
@@ -27,6 +28,8 @@ use smithay::{
             xdg::{decoration::XdgDecorationState, ToplevelSurface, XdgShellState},
         },
         shm::ShmState,
+        single_pixel_buffer::SinglePixelBufferState,
+        viewporter::ViewporterState,
         xdg_activation::XdgActivationState,
     },
 };
@@ -83,6 +86,12 @@ pub struct CompositorState {
     pub primary_selection: PrimarySelectionState,
     /// xdg-activation: «открой то окно» (ссылки, .desktop, мессенджеры).
     pub activation: XdgActivationState,
+    /// wp_viewporter — ОБЯЗАТЕЛЕН для xwayland-satellite (иначе X11 не поднять).
+    pub viewporter: ViewporterState,
+    /// wp_single_pixel_buffer_v1 — клиенты рисуют сплошные поверхности дешевле.
+    pub single_pixel_buffer: SinglePixelBufferState,
+    /// wp_content_type_v1 — клиенты сообщают «это видео/игра» (нужно для полноэкранного).
+    pub content_type: ContentTypeState,
 
     pub seat_state: SeatState<CompositorState>,
     pub seat: Seat<CompositorState>,
@@ -161,6 +170,9 @@ impl CompositorState {
         let decoration = XdgDecorationState::new::<CompositorState>(&display_handle);
         let primary_selection = PrimarySelectionState::new::<CompositorState>(&display_handle);
         let activation = XdgActivationState::new::<CompositorState>(&display_handle);
+        let viewporter = ViewporterState::new::<CompositorState>(&display_handle);
+        let single_pixel_buffer = SinglePixelBufferState::new::<CompositorState>(&display_handle);
+        let content_type = ContentTypeState::new::<CompositorState>(&display_handle);
 
         let mut seat_state = SeatState::<CompositorState>::new();
         let seat = seat_state.new_wl_seat(&display_handle, "seat0");
@@ -180,6 +192,9 @@ impl CompositorState {
             decoration,
             primary_selection,
             activation,
+            viewporter,
+            single_pixel_buffer,
+            content_type,
             seat_state,
             seat,
             keyboard: None,

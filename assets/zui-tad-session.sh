@@ -11,6 +11,15 @@ export XDG_SESSION_TYPE=wayland
 export ZUI_STORE_PATH="${ZUI_STORE_PATH:-$state/store.sled}"
 export ZUI_SESSION_PATH="${ZUI_SESSION_PATH:-$state/session.json}"
 
+# X11-приложения: поднимаем xwayland-satellite (он даёт X-сервер поверх нас)
+if command -v xwayland-satellite >/dev/null 2>&1; then
+    xwayland-satellite :0 >>"$state/xwayland.log" 2>&1 &
+    export DISPLAY=:0
+    echo "xwayland-satellite запущен, DISPLAY=:0" >>"$state/zui-tad.log"
+else
+    echo "xwayland-satellite не найден — X11-приложения будут недоступны" >>"$state/zui-tad.log"
+fi
+
 # Автозапуск: свои команды — в этот файл (по одной на строку)
 autostart="${XDG_CONFIG_HOME:-$HOME/.config}/zui-tad/autostart.sh"
 if [ -x "$autostart" ]; then

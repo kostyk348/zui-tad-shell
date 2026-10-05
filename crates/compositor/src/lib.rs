@@ -47,6 +47,12 @@ smithay::delegate_xdg_decoration!(CompositorState);
 smithay::delegate_primary_selection!(CompositorState);
 #[cfg(feature = "smithay")]
 smithay::delegate_xdg_activation!(CompositorState);
+#[cfg(feature = "smithay")]
+smithay::delegate_viewporter!(CompositorState);
+#[cfg(feature = "smithay")]
+smithay::delegate_single_pixel_buffer!(CompositorState);
+#[cfg(feature = "smithay")]
+smithay::delegate_content_type!(CompositorState);
 
 /// Start Wayland compositor or explain embedded mode.
 pub fn run_compositor(store: Arc<Mutex<GraphStore>>, embedded: bool) -> Result<()> {

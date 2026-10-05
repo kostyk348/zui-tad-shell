@@ -344,6 +344,10 @@ fn handle_winit_event(
             state.set_viewport(size.w as u32, size.h as u32);
             state.update_output_mode(size.w as u32, size.h as u32);
         }
+        WinitEvent::Focus(false) => {
+            // Потеряли фокус окна — грабы (drag/pan) надо снять, иначе они «залипнут».
+            state.interact.end();
+        }
         WinitEvent::CloseRequested => {
             save_session(state);
             state.shell.save();
@@ -755,6 +759,8 @@ fn handle_shortcut(
         return false;
     }
     match sym {
+        // Esc без открытого меню — снять граб (страховка от залипшего drag/pan)
+        keysyms::KEY_Escape => state.interact.end(),
         keysyms::KEY_Left => jump(state, Dir::Left),
         keysyms::KEY_Right => jump(state, Dir::Right),
         keysyms::KEY_Up => jump(state, Dir::Up),
@@ -823,6 +829,7 @@ fn shell_key_for(sym: u32, logo: bool) -> Option<ShellKey> {
         KEY_Down => ShellKey::Down,
         KEY_Return | KEY_KP_Enter => ShellKey::Enter,
         KEY_Escape => ShellKey::Esc,
+        // Esc вне меню снимает граб (страховка от залипшего drag/pan)
         KEY_BackSpace => ShellKey::Backspace,
         KEY_F1 | KEY_Help => ShellKey::ToggleHelp,
         KEY_F2 => ShellKey::ToggleHud,
