@@ -10,6 +10,8 @@ use tad_core::GraphStore;
 #[cfg(feature = "smithay")]
 mod backend;
 #[cfg(feature = "smithay")]
+pub mod drm;
+#[cfg(feature = "smithay")]
 mod handlers;
 #[cfg(feature = "smithay")]
 mod shell;

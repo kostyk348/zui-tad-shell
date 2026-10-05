@@ -99,8 +99,13 @@ zui-compositor --check      # ЧТО ГОТОВО, а что нет — до п�
 
 ```bash
 # из консоли, без графической сессии
-ZUI_STORE_PATH=~/.local/state/zui-tad/store.sled zui-compositor --drm
+zui-compositor --drm          # слой 0: сессия + карта + план вывода (проверено вживую)
 ```
+
+`--drm` уже сейчас поднимает libseat-сессию, открывает карту и печатает план:
+crtc, коннекторы, доступные режимы (`● card1-eDP-1 connected 1920x1200, …`).
+Композитинг и page-flip — следующий шаг, план и выверенные сигнатуры в
+[`docs/DRM-DESIGN.md`](docs/DRM-DESIGN.md).
 
 Автозапуск своих приложений — `~/.config/zui-tad/autostart.sh` (исполняемый).
 Логи — `~/.local/state/zui-tad/zui-tad.log`.
@@ -199,12 +204,13 @@ rm data/session.json                 # начать с чистого холст
 Реализовано: `wl_compositor`, `xdg_shell`, `wl_shm`, `wl_seat` (+клавиатура,
 указатель), `wl_output`, `xdg-decoration` (честно отвечаем `client-side`),
 `primary-selection`, `xdg-activation` (активация фокусирует окно на холсте),
+`cursor-shape-v1` (именованные курсоры клиента пробрасываются в системный указатель),
 `wlr-layer-shell`, `session-lock`, `foreign-toplevel-list`, `data-device`
 (буфер обмена), плюс курсоры-поверхности от клиентов.
 
-Чего нет и почему: **screencopy** в smithay 0.5 отсутствует как модуль
-(нужен свой protocol-модуль + экспорт кадров через `ExportMem`, либо
-xdg-desktop-portal); **ext-idle-notify** требует `calloop`-хендла, а наш цикл
+Чего нет и почему: **screencopy** — модуля в smithay 0.5 нет, а GL-readback закрыт
+(`GlesMapping` не отдаёт пиксели публично); станет тривиальным на CPU-пути DRM
+(см. `docs/DRM-DESIGN.md`), либо через xdg-desktop-portal; **ext-idle-notify** требует `calloop`-хендла, а наш цикл
 построен на winit — это отдельная переделка цикла.
 
 ### Известные ограничения

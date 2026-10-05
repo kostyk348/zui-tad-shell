@@ -127,6 +127,9 @@ pub struct CompositorState {
     pub cursor_hidden: bool,
     /// Курсор-поверхность от клиента (свой битмап курсора).
     pub cursor_surface: Option<WlSurface>,
+    /// Именованный курсор (cursor-shape-v1). Тип тот же, что у winit
+    /// (smithay реэкспортирует `cursor_icon::CursorIcon`), поэтому маппинг не нужен.
+    pub cursor_named: Option<smithay::input::pointer::CursorIcon>,
     pub cursor_hotspot: (i32, i32),
 
     /// Window title → foreign toplevel handle for waybar.
@@ -205,6 +208,7 @@ impl CompositorState {
             last_click: None,
             cursor_hidden: false,
             cursor_surface: None,
+            cursor_named: None,
             cursor_hotspot: (0, 0),
             toplevel_handles: RwLock::new(Vec::new()),
         }

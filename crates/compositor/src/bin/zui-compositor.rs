@@ -25,6 +25,16 @@ fn main() -> Result<()> {
         check();
         return Ok(());
     }
+    if std::env::args().any(|a| a == "--drm") {
+        // Слой 0 TTY-бэкенда: сессия + карта + план вывода.
+        #[cfg(feature = "smithay")]
+        {
+            compositor::drm::probe_and_plan()?;
+        }
+        #[cfg(not(feature = "smithay"))]
+        println!("соберите с --features smithay");
+        return Ok(());
+    }
 
     let path = std::env::var("ZUI_STORE_PATH").unwrap_or_else(|_| "data/store.sled".into());
     let _ = std::fs::create_dir_all("data");

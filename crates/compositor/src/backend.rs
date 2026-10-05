@@ -547,6 +547,11 @@ fn set_hover_cursor(state: &CompositorState, win: &::winit::window::Window) {
         return;
     }
     win.set_cursor_visible(true);
+    // Клиент попросил именованный курсор (cursor-shape-v1) — уважаем его.
+    if let Some(named) = state.cursor_named {
+        win.set_cursor_icon(named);
+        return;
+    }
     let icon = if let Some(h) = state.interact.resize_handle() {
         cursor_for(h)
     } else if state.interact.is_dragging() {

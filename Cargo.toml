@@ -58,7 +58,7 @@ rdev = "0.5"
 smithay = { version = "0.5", default-features = false, features = [
     "backend_winit", "backend_egl",
     "backend_drm", "backend_udev", "backend_gbm",
-    "backend_libinput", "backend_session",
+    "backend_libinput", "backend_session", "backend_session_libseat",
     "renderer_gl", "wayland_frontend",
     "desktop", "input", "xwayland", "use_system_lib"
 ] }

@@ -333,17 +333,20 @@ impl SeatHandler for CompositorState {
             CursorImageStatus::Hidden => {
                 self.cursor_hidden = true;
                 self.cursor_surface = None;
+                self.cursor_named = None;
             }
             CursorImageStatus::Surface(surface) => {
                 // Клиент рисует свой курсор — покажем его поверх всего.
                 self.cursor_hidden = false;
+                self.cursor_named = None;
                 self.cursor_surface = Some(surface);
             }
-            CursorImageStatus::Named(_) => {
-                // Именованные курсоры (cursor-shape-v1) оставляем системными:
-                // рисуем своим набором иконок ресайза/указателя.
+            CursorImageStatus::Named(icon) => {
+                // cursor-shape-v1: smithay и winit используют ОДИН тип
+                // (cursor_icon::CursorIcon), поэтому просто пробрасываем иконку.
                 self.cursor_hidden = false;
                 self.cursor_surface = None;
+                self.cursor_named = Some(icon);
             }
         }
     }
