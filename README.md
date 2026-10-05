@@ -1,558 +1,215 @@
-# ZUI-TAD Shell — Spatial Desktop Environment
+# ZUI-TAD Shell — an infinite-canvas Wayland desktop
 
 [![CI](https://github.com/kostyk348/zui-tad-shell/actions/workflows/ci.yml/badge.svg)](https://github.com/kostyk348/zui-tad-shell/actions/workflows/ci.yml)
-![tests](https://img.shields.io/badge/tests-106%20passing-brightgreen)
+![tests](https://img.shields.io/badge/tests-123%20passing-brightgreen)
 ![license](https://img.shields.io/badge/license-MIT-blue)
 ![render](https://img.shields.io/badge/render-CPU%20%C2%B7%2060fps-orange)
 ![platform](https://img.shields.io/badge/platform-Linux%20(Wayland%20%2B%20X11)-lightgrey)
 
-**EN:** a tiling-free Wayland desktop: an infinite 2D canvas instead of
-workspaces, a phosphor-CRT shell (Dead Space RIG × Signalis mood) with a command
-palette, and a TAD/BTRON object model underneath. Pure-CPU renderer keeps 60 fps
-without a GPU. **RU:** ниже.
+**ZUI-TAD** is a desktop that throws away workspaces and tiling. Windows keep
+their **native size on an infinite 2D canvas**, and your screen is a **camera**
+looking at it. There is no workspace list — there are canvas bookmarks, anchors
+and implicit **clusters** of windows that snapped to each other.
 
-Полноценный Wayland-композитор на Rust с ZUI-парадигмой (бесконечный холст + BTRON/TAD модель данных).
+On top of that sits a **phosphor-CRT shell** (Dead Space RIG × Signalis mood):
+amber/orange monochrome, scanlines, dithering, segmented meters, a command
+palette, an ECG vitals strip, a canvas minimap — and it is **pure CPU rendering**,
+so it holds 60 fps with no GPU at all.
 
-**Стек:** Rust 1.80+ · smithay 0.5 (Wayland compositor) · tiny-skia (2D) · ab_glyph (TTF) · sled (embedded DB) · MessagePack.
-
----
-
-## Что можно посмотреть прямо сейчас
-
-Две вещи работают **без GPU и без Wayland-сессии** (CPU-рендер, softbuffer):
-
-```bash
-# 1. ЖИВОЕ окно холста: мышь (drag окон, панорама, зум Mod+колесо),
-#    клавиши: ←↑→↓ прыжок · Space home · W overview · M fit · +/-/0 зум
-#             1/2/3 тема (Rig / Signalis / Phosphor) · L лаунчер · Esc выход
-cargo run --release -p phosphor --bin zui-preview
-
-# 2. Статичный мок оболочки в PNG (в репо: docs/shots/)
-cargo run --release -p phosphor --bin shell_shot -- docs/shots/shell.png rig
-cargo run --release -p phosphor --bin shell_shot -- docs/shots/shell.png signalis
-cargo run --release -p phosphor --bin shell_shot -- docs/shots/shell.png rig clean  # без CRT-эффектов
+```text
+┌─ ZUI-TAD ──▌▌▌▌▌▌▌▌▌─ CAM 120:-40  ZOOM 1.25  WIN 7 ── 21:47  29 SEP ── CPU ▌▌▌ RAM ▌▌▌▌ ─┐
+│                                                                                          │
+│        ╭──────────────╮   ╭──────────────╮        ╭─ CLUSTER · 2 WINDOWS ─╮               │
+│        │ terminal     │   │ memory.rs    │        │  move together        │   ┌─ VITAL 64 ─┐
+│        │ 01 ok        │   │ 01 ok        │        ╰───────────────────────╯   │  ╱╲___╱╲__ │
+│        ╰──────────────╯   ╰──────────────╯                                    └───────────┘
+│   ┌─ DORMANT · место сохранено ─┐                        ┌─ MAP · CANVAS ─┐
+│   │ browser (suspended)         │                        │  ▉▉  ▉▉        │
+│   └─────────────────────────────┘                        └────────────────┘
+└─ : menu · ? help · L launcher · W overview · M fit · TAB windows · F2 HUD · F3 focus ──────┘
 ```
 
-Композитор (настоящие Wayland-клиенты на холсте) — nested-режим:
+## Screenshots
 
-```bash
-ZUI_STORE_PATH=data/store.sled \
-cargo run -p compositor --features smithay --bin zui-compositor
-# Отдельно, в другом терминале:
-XDG_RUNTIME_DIR=/run/user/$UID WAYLAND_DISPLAY=zui-tad-0 alacritty
-```
-
-Проба железа (ничего не захватывает): `... --bin zui-compositor -- --probe` —
-покажет карты `/dev/dri`, коннекторы и их статус, устройства ввода.
-
-### Что уже умеет композитор (проверено вживую)
-
-* настоящие Wayland-приложения живут на холсте: `alacritty`, `foot`, GTK-приложения;
-* **перетаскивание** окна мышью (или за CSD-заголовок — через `move_request` клиента);
-* **ресайз за любой из 8 краёв** (9 px зона, размер уходит клиенту через `xdg configure`);
-* двойной клик по окну = fit-window; `maximize`/`fullscreen`/`minimize` от клиента и с клавиатуры;
-* клавиатурный фокус по клику, системные курсоры ресайза, скрытие курсора по просьбе клиента;
-* горячие клавиши холста: `Mod+←↑→↓` прыжок, `Alt+Tab` MRU, `Mod+W` overview, `Mod+M` fit,
-  `Mod+±/0` зум, `Mod+1..4` закладки, `Mod+Return` терминал, `Mod+Q` закрыть;
-* **оболочка живёт внутри композитора**: панель с телеметрией, миникарта, ЭКГ-виталы,
-  строка подсказок, тосты и **командное меню** рисуются GL-слоем поверх реальных окон
-  (`MemoryRenderBuffer`). Клик по панели открывает меню, строка меню выполняет действие
-  (смена темы видна сразу), `F12`/`Mod+D` — то же с клавиатуры.
-  Слой перерисовывается только при изменениях (секунда часов, состояние меню) — в простое
-  это один блит текстуры на кадр.
-
-### Превью оболочки (HUD)
-
-`zui-preview` держит **60 fps** (CPU, без GPU) и показывает: фосфорную панель,
-миникарту холста, ЭКГ-виталы, луч CRT-развёртки, рамку-видоискатель с прицелом,
-тосты и HUD окна под курсором (`app · размер · зум`).
-
-Скриншоты — в `docs/shots/` (кликабельны, лежат в репо): `shell-rig.png`, `shell-signalis.png`,
-`shell-rig-clean.png` (без CRT-эффектов), `shell-menu.png`, `shell-help.png`,
-`preview-rig.png`, `preview-hud.png`, `preview-menu.png`, `preview-help.png`,
-`compositor-real-app.png` (живой alacritty на холсте), `compositor-resize.png`.
-
----
-
-## Запуск как настоящая сессия
-
-```bash
-./install.sh                # бинари + сессии для DM (нужен sudo) 
-./install.sh --user         # то же в ~/.local (без root)
-zui-compositor --check      # ЧТО ГОТОВО, а что нет — до попытки входа
-```
-
-`--check` смотрит окружение и говорит прямо: есть ли DRM-карты, подключённые
-коннекторы, устройства ввода, группы, конфиг и сессия холста. Пример вывода на
-машине, где уже запущен X11:
-
-```
-! мы внутри сессии (SESSION_TYPE="x11") — DRM/TTY отсюда не занять
-✓ DRM-карты: ["card1"]
-✓ подключено: ["card1-eDP-1"]
-✓ устройств ввода: 14
-итог: 6 ok, 1 предупреждений, 0 проблем
-```
-
-Дальше — либо сессия из DM (выбрать **ZUI-TAD** на экране входа: ставится в
-`/usr/share/wayland-sessions`), либо из TTY:
-
-```bash
-# из консоли, без графической сессии
-zui-compositor --drm          # слой 0: сессия + карта + план вывода (проверено вживую)
-```
-
-`--drm` уже сейчас поднимает libseat-сессию, открывает карту и печатает план:
-crtc, коннекторы, доступные режимы (`● card1-eDP-1 connected 1920x1200, …`).
-Композитинг и page-flip — следующий шаг, план и выверенные сигнатуры в
-[`docs/DRM-DESIGN.md`](docs/DRM-DESIGN.md).
-
-Автозапуск своих приложений — `~/.config/zui-tad/autostart.sh` (исполняемый).
-Логи — `~/.local/state/zui-tad/zui-tad.log`.
-
-Пакетирование: `packaging/PKGBUILD` (Artix/Arch), `packaging/zui-tad.service`
-(пользовательский systemd-юнит для запуска из консоли).
-
-**Статус честно**: HTTP-сессия из DM/TTY требует DRM/TTY-бэкенда, которого пока
-нет — он расписан по шагам с выверенными сигнатурами в
-[`docs/ROADMAP.md`](docs/ROADMAP.md). Сейчас работает nested-режим (окно поверх
-любой сессии) и CPU-превью оболочки; всё остальное — из ROADMAP.
-
-## FAQ · горячие клавиши
-
-| Клавиша | Что делает |
+| | |
 |---|---|
-| `:`, `/`, `p` | **командное меню** (фильтр набором, `↑↓`, `Enter`) |
-| `?`, `F1` | справка по клавишам (этот список) |
-| `1` `2` `3` | тема: **RIG** (оранжевый сигнал) / **SIGNALIS** (амбер CRT) / **PHOSPHOR** (зелёный) |
-| `F2` | HUD вкл/выкл (миникарта, виталы, HUD окна, видоискатель) |
-| `F3` | **focus mode** — тихий режим для долгой работы (панель + подсказки, без HUD) |
-| `F4` | виталы ЭКГ вкл/выкл |
-| `F5` | луч CRT-развёртки вкл/выкл |
-| `F6` | качество: **AUTO / RICH / LEAN** (AUTO сам ужимает эффекты, если кадр не влезает) |
-| `L` | лаунчер приложений |
-| `Space` | home: origin холста, зум 1:1 |
-| `W` | overview — показать все окна разом |
-| `M` | fit окна под экран (maximize на холсте) |
-| `S` | suspend окна (остаётся плейсхолдер, `Enter` вернёт на место) |
-| `Tab` | окна по MRU (как `Alt+Tab`) |
-| `+` `-` `0` | зум / сброс зума |
-| `Mod`+колесо | зум к курсору |
-| `← ↑ → ↓` | прыжок к ближайшему окну в направлении |
-| ЛКМ | фокус + перенос окна; по пустому холсту — панорама |
-| **ЛКМ за край (9px)** | ресайз за любой из 8 краёв, размер уходит клиенту |
-| `Mod`+ЛКМ | панорама холста |
-| двойной клик | fit окна |
-| `Esc` | закрыть окно/меню; на пустом экране — выход (настройки сохраняются) |
+| ![shell](docs/shots/shell-signalis.jpg) | ![menu](docs/shots/shell-menu.jpg) |
+| **Signalis theme** — amber CRT, scanlines, grain | **Command palette** — filter, groups, hints |
+| ![real apps](docs/shots/compositor-real-app.png) | ![xwayland](docs/shots/compositor-xwayland.png) |
+| **Real apps on the canvas** (kitty, fish) | **X11 apps on the canvas** (xterm via XWayland) |
+| ![preview](docs/shots/preview-bg.png) | ![grim](docs/shots/screencopy-grim.png) |
+| **Live preview**, 60 fps CPU, wallpaper + HUD | **Screenshot taken from inside** (`grim`) |
 
-### Настройки
+## Features
 
-`~/.config/zui-tad/shell.toml` — тема, качество, HUD/виталы/развёртка, focus mode.
-Файл создаётся сам при выходе; правится руками в любой момент:
+**Canvas, not workspaces**
+* infinite 2D canvas; windows keep their native size, the viewport pans and zooms
+* **snapping → implicit clusters**: touch two edges and they move/resize together
+* directional jump to the nearest window (`←↑→↓`), MRU cycling (`Alt+Tab`),
+  zoom-to-fit overview (`W`), canvas bookmarks (`Mod+1..4`), anchors
+* **window suspend**: closing leaves a dormant placeholder; relaunching the same
+  app *adopts its old spot*
+* **session restore**: canvas, clusters, camera, bookmarks and anchors are saved
+  (`session.json`) and restored dormant — nothing is auto-launched
+
+**Real clients, really managed**
+* drag by mouse, **resize from any of 8 edges** (sent to the client as `xdg configure`)
+* maximize / fullscreen / minimize, including `move_request` / `resize_request`
+  from client-side decorations
+* click-to-focus, system resize cursors, client cursor surfaces and
+  `cursor-shape-v1` named cursors
+* **X11 apps work** through `xwayland-satellite` (xterm, Steam, browsers…)
+
+**Shell**
+* phosphor-CRT post-processing: ordered dither → scanlines → chromatic
+  aberration → vignette → grain (deterministic by seed)
+* top panel (canvas/zoom/window telemetry), canvas minimap, ECG vitals,
+  viewfinder frame + reticle, toasts, hover HUD
+* **command palette** (`:`) with fuzzy filter, groups, icons and mouse support
+* help/FAQ overlay (`?`), focus mode (`F3`) for long sessions, hint bar
+* 24 procedurally drawn icons and 5 procedural textures — no bitmap assets
+* three themes: **Rig** (orange signal), **Signalis** (amber CRT), **Phosphor** (green)
+* TOML config that survives restarts (`~/.config/zui-tad/shell.toml`)
+
+**Protocols**
+`wl_compositor`, `xdg_shell`, `wl_shm`, `wl_seat` (keyboard/pointer), `wl_output`
+(+`xdg-output`), `xdg-decoration` (client-side), `primary-selection`,
+`xdg-activation`, `wlr-layer-shell`, `session-lock`, `foreign-toplevel-list`,
+`data-device`, `wp_viewporter`, `wp_single_pixel_buffer_v1`, `wp_content_type_v1`,
+`wlr-screencopy` (screenshots: `grim` works inside the session).
+
+## Try it
+
+### 1. Shell preview (no GPU, no session needed)
+
+```bash
+git clone https://github.com/kostyk348/zui-tad-shell && cd zui-tad-shell
+cargo run --release -p phosphor --bin zui-preview
+```
+A live window with a mock canvas: 4 windows, wallpapers, HUD, minimap, ECG,
+command palette. Keys: `:` menu · `?` help · `1/2/3` themes · `F2` HUD ·
+`F3` focus · `F6` quality · `L` launcher · `Space/W/M/S` · `+/-/0` zoom ·
+mouse: drag windows, resize from the 9 px edge, pan on empty canvas,
+`Mod`+wheel to zoom, click the panel to open the menu.
+
+### 2. Real applications on the canvas (nested, inside any session)
+
+```bash
+export XDG_RUNTIME_DIR=${XDG_RUNTIME_DIR:-/run/user/$(id -u)}
+ZUI_STORE_PATH=$PWD/data/store.sled ./target/release/zui-compositor &
+
+WAYLAND_DISPLAY=zui-tad-0 kitty &          # Wayland client
+xwayland-satellite :0 &                    # X11 support (build from source, see below)
+DISPLAY=:0 xterm &                         # X11 client
+WAYLAND_DISPLAY=zui-tad-0 grim shot.png    # screenshots work
+```
+
+### 3. Install as a session
+
+```bash
+./install.sh            # binaries + display-manager session entries (needs sudo)
+./install.sh --user     # same into ~/.local
+zui-compositor --check  # readiness report: DRM cards, connectors, input, X11, config
+```
+Then pick **ZUI-TAD** on your login screen (or run from a TTY).
+The session wrapper auto-starts `xwayland-satellite` and your
+`~/.config/zui-tad/autostart.sh`.
+
+## Performance (measured)
+
+Pure-CPU rendering at 1600×900 on a Ryzen 7 7840HS:
+
+| | frame time | raw fps | RSS |
+|---|---|---|---|
+| first working version | 41 ms | 24 | 33 MB |
+| after CRT/atlas work | 15.2 ms | 66 | 33 MB |
+| **now** (memcpy blits, byte CRT, cached chrome, budgeted caches) | **7.2–7.8 ms** | **125–130** | **33 MB** |
+
+Frame breakdown from the log:
+`frame 7.7ms = compose 2.7 [bg 0.9 grid 0.2 cards 0.8 chrome 0.0 hud 1.0] + crt 3.9 + blit 0.5`.
+Adaptive quality: `AUTO` drops to `LEAN` only if the average frame exceeds 90 %
+of the 60 fps budget — in practice it stays `RICH`.
+
+The compositor (nested, GL) reports 93–103 MB RSS, but **Pss ≈ 50–53 MB**; about
+54 MB of that is *shared* Mesa/LLVM pages counted once for every GL process on the
+system. Our own private memory is ~30 MB.
+
+## Configuration
+
+`~/.config/zui-tad/shell.toml` (created automatically; unknown keys are ignored):
 
 ```toml
-theme = "signalis"      # rig | signalis | phosphor
+theme = "rig"           # rig | signalis | phosphor
 quality = "auto"        # auto | rich | lean
-bg = "hull"             # hull | starfield | crt | blueprint | off | путь к картинке
-focus_mode = false
-hud = true
+bg = "hull"             # hull | starfield | crt | blueprint | off | /path/to/image.png
+hud = true              # minimap, vitals, hover HUD, viewfinder
 vitals = true
-beam = true
+beam = true             # CRT scan beam
+focus_mode = false      # quiet mode: panel + hints only
 help_on_start = false
 ```
 
-### Обои
-
-Фон — процедурный (своя графика, никаких чужих игровых ассетов):
+Wallpapers are generated by our own code (no third-party game assets):
 
 ```bash
-cargo run --release -p phosphor --bin gen_bg            # 12 обоев в assets/backgrounds
+cargo run --release -p phosphor --bin gen_bg              # 1920x1080, 12 files
 cargo run --release -p phosphor --bin gen_bg -- 2560 1440
 ZUI_WALLPAPER=~/Pictures/wp.png cargo run --release -p phosphor --bin zui-preview
 ```
 
-Виды: `hull` (панельная обшивка корабля), `starfield` (звёздное поле),
-`crt` (кинескоп с полутоном и «текстом»), `blueprint` (чертёж). Фон
-двигается с параллаксом и кэшируется — кадр почти не дорожает.
+## Hotkeys (compositor)
 
-### Структура
-
-| Крейт | Роль |
+| Key | Action |
 |---|---|
-| `crates/canvas-engine` | камера, раскладка холста, Scene/кластеры, взаимодействие (drag/resize/pan) — чистая логика, 46 тестов |
-| `crates/phosphor` | оболочка: палитры, CRT-эффекты, панель, OSD, HUD, меню, справка, иконки, текстуры, обои — 60 тестов |
-| `crates/compositor` | Wayland-композитор на smithay: реальные окна на холсте, wl_output, drag/resize/maximize |
-| `crates/tad-core`, `crates/de-common` | объектная модель RO/VO и общие утилиты DE |
-| `legacy/` | прежний стек (softbuffer-шелл, TAD-редакторы) — не собирается, см. `legacy/README.md` |
-
-### Сессия холста
-
-Раскладка переживает перезапуск: окна, кластеры, камера, закладки и якоря
-складываются в `data/session.json` (автосейв каждые 5 с при изменениях + при
-выходе). При старте холст восстанавливается **dormant**: окна возвращаются
-плейсхолдерами «DORMANT · МЕСТО СОХРАНЕНО», ничего не запускается само.
-Когда то же приложение запускают снова — оно **усыновляет своё место**
-(лог `adopted session slot for app_id=kitty`).
-
-```bash
-cat data/session.json | head -20     # посмотреть, что сохранено
-rm data/session.json                 # начать с чистого холста
-```
-
-### Протоколы
-
-Реализовано: `wl_compositor`, `xdg_shell`, `wl_shm`, `wl_seat` (+клавиатура,
-указатель), `wl_output`, `xdg-decoration` (честно отвечаем `client-side`),
-`primary-selection`, `xdg-activation` (активация фокусирует окно на холсте),
-`cursor-shape-v1` (именованные курсоры клиента пробрасываются в системный указатель),
-`wlr-layer-shell`, `session-lock`, `foreign-toplevel-list`, `data-device`
-(буфер обмена), плюс курсоры-поверхности от клиентов.
-
-Чего нет и почему: **screencopy** — модуля в smithay 0.5 нет, а GL-readback закрыт
-(`GlesMapping` не отдаёт пиксели публично); станет тривиальным на CPU-пути DRM
-(см. `docs/DRM-DESIGN.md`), либо через xdg-desktop-portal; **ext-idle-notify** требует `calloop`-хендла, а наш цикл
-построен на winit — это отдельная переделка цикла.
-
-### Известные ограничения
-
-* вложенный запуск под X11 без рабочего WM: синтетические клавиши (`xdotool key`) до
-  окна композитора не доходят — горячие клавиши проверяются в живой сессии или в
-  `zui-preview` (там тот же код оболочки);
-* белые полосы при ресайзе, которые были видны с `alacritty` (GTK CSD), **не
-  воспроизводятся** с `kitty` — это клиентская перерисовка, а не композитор.
-
-### Частые вопросы
-
-**Будет ли 60 fps на моём железе?** Превью — чистый CPU-рендер. На Ryzen 7 7840HS
-кадр занимает ~9 мс из 16.6 мс бюджета (запас ~1.8×). На слабом CPU `quality`
-сам уйдёт в `LEAN` (сканлайны без зерна/дизеринга) — ничего делать не нужно.
-
-**Почему окна «плавают», а не тайлятся?** Это бесконечный холст: у окна есть
-место в мире, а не «слот» на экране. Сцепка окон (кластер) образуется сама,
-когда края касаются.
-
-**Что значит suspend?** Закрытое окно оставляет плейсхолдер на своём месте
-холста: `Enter`/клик возвращает приложение туда же (сессия не теряет раскладку).
-
-**Как посмотреть настройки качества в рантайме?** В модуле `RIG` справа:
-`FRAME 8.8ms`, `MODE AUTO·RICH|RICH|LEAN`.
-
----
-
-## ⚙️ Установка
-
-### 1. Установить Rust
-
-```bash
-curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y --default-toolchain stable
-source "$HOME/.cargo/env"
-rustup default stable   # ВАЖНО: без этого cargo не запустится!
-rustc --version          # должно быть >= 1.80
-```
-
-### 2. Системные зависимости
-
-**Ubuntu/Debian:**
-```bash
-sudo apt install -y \
-    build-essential pkg-config \
-    libwayland-dev libxkbcommon-dev libx11-dev libxrandr-dev \
-    libxinerama-dev libxcursor-dev libxi-dev libegl1 libgles2 \
-    libudev-dev libseat-dev libdrm-dev libgbm-dev libinput-dev \
-    fonts-dejavu-core wmctrl xdotool
-```
-
-**Fedora:**
-```bash
-sudo dnf install -y gcc pkg-config wayland-devel libxkbcommon-devel \
-    libX11-devel libXrandr-devel libXinerama-devel libXcursor-devel \
-    libXi-devel mesa-libGLES-devel systemd-devel libseat-devel \
-    libdrm-devel gbm-devel libinput-devel dejavu-fonts-common wmctrl xdotool
-```
-
-**Arch:**
-```bash
-sudo pacman -S base-devel pkgconf wayland libxkbcommon libx11 libxrandr \
-    libxinerama libxcursor libxi mesa systemd libseat libdrm libinput \
-    ttf-dejavu wmctrl xdotool
-```
-
-### 3. Сборка
-
-```bash
-git clone <repo> zui-tad-shell
-cd zui-tad-shell
-cargo build --release
-```
-
-### 4. Установка как DE
-
-```bash
-sudo ./install.sh
-```
-
-Ставит:
-- `/usr/local/bin/zui-tad-shell` — основной бинарник
-- `/usr/local/bin/zui-tad-shell-session` — wrapper для DM
-- `/usr/share/wayland-sessions/zui-tad-shell.desktop` — для GDM/SDDM
-- `/usr/share/xsessions/zui-tad-shell.desktop` — для LightDM
-- `/usr/share/applications/zui-tad-shell.desktop` — в меню приложений
-- `/usr/local/share/zui-tad-shell/fonts/` — шрифты
-
-### 5. Запуск
-
-**Способ 1: Из логин-экрана (рекомендуется)**
-1. Выйти из текущей сессии
-2. На экране входа выбрать "ZUI-TAD Shell"
-3. Ввести пароль → запустится как настоящая DE
-
-**Способ 2: Внутри текущей DE (для теста)**
-```bash
-zui-tad-shell
-```
-
-**Способ 3: Wayland-композитор (smithay 0.5)**
-```bash
-cargo build --release --features compositor/smithay
-ZUI_STORE_PATH=data/store.sled ./target/release/zui-tad-shell --compositor --embedded
-# Запуск клиента: WAYLAND_DISPLAY=... alacritty
-```
-
-### Встроенные TAD-приложения
-
-| Клавиша | Приложение |
-|---------|------------|
-| `Ctrl+,` | Settings (настройки DE) |
-| `Ctrl+F` | Files (файловый менеджер) |
-| `Ctrl+Shift+C` | Calculator |
-
-На рабочем столе демо-сцены три VO закреплены вверху. Calculator принимает цифры и `+-*/=C`. Files: стрелки, Enter — открыть, Backspace — вверх. Settings: Space/Enter — переключить опцию.
-
----
-
-## Возможности DE
-
-| Компонент | Что делает |
-|-----------|------------|
-| **Wayland compositor** | Полноценный композитор на smithay 0.5 (как sway/Hyprland) |
-| **Top panel** | Встроенная или waybar/polybar (через wlr_layer_shell) |
-| **App launcher** | Встроенный или rofi/wofi/fuzzel/walker/tofi/dmenu |
-| **Workspace manager** | 9 независимых рабочих столов, каждый со своей камерой |
-| **TAD-документы** | Встроенные редакторы текста/вектора/таблиц с undo/redo |
-| **Порталы** | Анимированные переходы между документами по клику |
-| **WM-интеграция** | Запуск терминала/браузера/редактора как VO на холсте |
-| **Window embedding** | Захват surface как текстуры → встраивание в VO |
-| **Multi-monitor** | Поддержка нескольких мониторов + hotplug через udev |
-| **XWayland** | Для X11-приложений |
-| **Session lock** | ext_session_lock_v1 protocol (swaylock/hyprlock) |
-| **Foreign toplevel** | waybar видит список окон, переключение, закрытие |
-| **Импорт файлов** | Drag-and-drop `.txt/.md/.png/.jpg` → RO + VO |
-| **Autostart** | `~/.config/zui-tad/autostart.sh` |
-| **Конфиг TOML** | `~/.config/zui-tad/config.toml` |
-
----
-
-## Горячие клавиши
-
-### DE
-| Клавиша | Действие |
-|---------|----------|
-| `Ctrl+1..9` | Workspace switch |
-| `Ctrl+Shift+1..9` | Переместить окно на workspace |
-| `Ctrl+Tab` / `Ctrl+Shift+Tab` | Next/prev workspace |
-| `Ctrl+Space` | App launcher (встроенный или rofi/wofi) |
-| `Ctrl+Alt+L` | Lock screen (swaylock/hyprlock) |
-| `Ctrl+Alt+Del` | Выход |
-| `Ctrl+Q` | Выход |
-
-### Запуск приложений
-| Клавиша | Приложение |
-|---------|------------|
-| `Ctrl+T` | Терминал |
-| `Ctrl+B` | Браузер |
-| `Ctrl+Shift+E` | Редактор кода |
-| `Ctrl+F` | Файловый менеджер |
-| `Ctrl+Shift+C` | Калькулятор |
-
-Кастомизация: `ZUI_TERMINAL=alacritty ZUI_BROWSER=firefox ZUI_EDITOR=code ZUI_FILES=thunar ZUI_CALC=gnome-calculator`
-
-### Навигация по холсту
-| Клавиша | Действие |
-|---------|----------|
-| `Space` | Сброс камеры |
-| `+`/`-` | Зум |
-| `0` | Зум 1:1 |
-| `F` | Перелёт к фокусному VO |
-| `Tab` / `Shift+Tab` | След./пред. сегмент |
-| `Esc` | Снять фокус |
-
-### Редакторы
-| Клавиша | Действие |
-|---------|----------|
-| `Ctrl+Z`/`Ctrl+Y` | Undo/Redo |
-| `Ctrl+S` | Сохранить в sled |
-| `Ctrl+E` | Экспорт в `.md` |
-| `Ctrl+N` | Новый текстовый документ |
-| `Ctrl+Shift+N` | Новый mindmap |
-| `Ctrl+Alt+N` | Новая таблица |
-| `Ctrl+D` | Дублировать VO |
-| `Delete` | Удалить VO |
-
-### Мышь
-| Действие | Эффект |
-|----------|--------|
-| Колесо | Зум к курсору |
-| Средняя + drag | Pan |
-| ЛКМ по VO | Фокус |
-| ЛКМ по порталу | Полёт камеры |
-| ЛКМ + drag | Перетаскивание VO |
-| Drag файла | Импорт `.txt/.md/.png/.jpg` |
-
-### Система
-| Клавиша | Действие |
-|---------|----------|
-| `F1` / `?` | Окно справки |
-| `F12` | Скриншот в `data/screenshot.png` |
-
----
-
-## Конфигурация
-
-`~/.config/zui-tad/config.toml`:
-
-```toml
-[launcher]
-backend = "rofi"            # builtin | rofi | wofi | fuzzel | walker | tofi | dmenu
-rofi_theme = "gruvbox-dark"
-
-[panel]
-backend = "waybar"          # builtin | waybar | polybar | yambar | none
-waybar_config = "~/.config/waybar/config"
-waybar_style = "~/.config/waybar/style.css"
-
-[wallpaper]
-backend = "swaybg"          # solid | swaybg | hyprpaper | wpaperd
-color = "#1a1b20"
-path = "~/Pictures/wallpaper.jpg"
-mode = "fill"
-
-[locker]
-backend = "swaylock"        # none | swaylock | hyprlock | waylock
-
-[notifications]
-backend = "mako"            # none | mako | dunst | fnott
-
-[clipboard]
-backend = "wl-clipboard"    # none | wl-clipboard
-
-[idle]
-backend = "swayidle"        # none | swayidle | hypridle
-timeout = 300
-lock_cmd = "swaylock -f"
-
-[session]
-polkit = true
-xdg_portal = true
-autostart_script = true
-```
-
-Пример в `assets/config.example.toml`.
-
----
-
-## Autostart
-
-`~/.config/zui-tad/autostart.sh`:
-
-```bash
-#!/bin/sh
-waybar &
-nm-applet &
-blueman-applet &
-/usr/libexec/polkit-gnome-authentication-agent-1 &
-```
-
-```bash
-chmod +x ~/.config/zui-tad/autostart.sh
-```
-
----
-
-## Архитектура
+| `Mod+D` / `F12` | command palette |
+| `F1` / `?` | help overlay |
+| `Mod+←↑→↓` | jump to nearest window |
+| `Alt+Tab` | cycle windows (MRU) |
+| `Mod+W` | overview (fit everything) |
+| `Mod+M` | fit focused window |
+| `Mod+S` | suspend focused window |
+| `Mod+1..4` / `Mod+Shift+1..4` | jump to / set canvas bookmark |
+| `Mod+±/0` | zoom in/out/reset |
+| `Mod+Return` | terminal · `Mod+Q` close · `Esc` cancel grab |
+| mouse | click panel → menu · drag window · 9 px edge → resize · double-click → fit |
+
+## Architecture
 
 ```
-zui-tad-shell/
-├── crates/
-│   ├── tad-core/         # TAD-формат, Real/Virtual Objects, GraphStore (sled)
-│   ├── canvas-engine/    # Камера, frustum culling, semantic LOD
-│   ├── editor-core/      # Фокус, редакторы, порталы, undo/redo
-│   ├── skia-renderer/    # CPU-рендеринг: tiny-skia + ab_glyph
-│   ├── de-common/        # Workspaces, launcher (без Wayland)
-│   ├── compositor/       # Опциональный smithay backend (`--features compositor/smithay`)
-│   └── shell-app/        # Основной ZUI DE (winit + softbuffer)
-├── assets/
-│   ├── fonts/                    # DejaVuSans
-│   ├── zui-tad-shell.desktop     # session entry для DM
-│   ├── zui-tad-shell-session.sh  # session wrapper
-│   └── config.example.toml
-├── docs/
-│   └── UPGRADE_TO_SMITHAY_0.5.md
-├── install.sh
-└── data/                         # sled-хранилище + screenshots (создаётся)
+shell      phosphor      panel · palette · help · HUD · OSD · wallpapers (CPU)
+──────────────────────────────────────────────────────────────────────────────
+compositor wl_output · xdg_shell · input · canvas render · screencopy · X11
+──────────────────────────────────────────────────────────────────────────────
+canvas     canvas-engine  Scene: windows, clusters, camera, interaction
+──────────────────────────────────────────────────────────────────────────────
+objects    tad-core       RO/VO model, sled storage, dormant placeholders
 ```
 
----
+* `canvas-engine` knows nothing about Wayland or GPUs — pure logic, fast tests.
+* `phosphor` knows nothing about the compositor — it draws into a CPU pixmap, so
+  the same code feeds the preview (softbuffer), the compositor (GL texture) and
+  `wlr-screencopy`.
+* the compositor only holds the bridge: `xdg_toplevel ↔ WindowId`, input in world
+  coordinates, `xdg configure` on resize.
 
-## Устранение ошибок
+Details and invariants: [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md).
+What is done, what is not, and why: [`docs/ROADMAP.md`](docs/ROADMAP.md).
+DRM/TTY reconnaissance with verified signatures: [`docs/DRM-DESIGN.md`](docs/DRM-DESIGN.md).
 
-| Ошибка | Решение |
-|--------|---------|
-| `rustup could not choose a version of cargo` | `rustup default stable` |
-| `Permission denied (os error 13)` | Запускайте из каталога проекта |
-| `Package libudev was not found` | `sudo apt install libudev-dev pkg-config` |
-| `Package libdrm was not found` | `sudo apt install libdrm-dev` |
-| `Package libinput was not found` | `sudo apt install libinput-dev` |
-| `Package libseat was not found` | `sudo apt install libseat-dev` |
-| `Package gbm was not found` | `sudo apt install libgbm-dev` |
-| `font DejaVuSans.ttf not found` | `sudo apt install fonts-dejavu-core` |
-| Сессия не появляется в GDM | Проверьте `ls /usr/share/wayland-sessions/zui-tad-shell.desktop` |
-| Не запускается из TTY | `loginctl` должен показывать вашу сессию как `seat0` |
-| Приложение не запускается через Ctrl+T | `ZUI_TERMINAL=alacritty zui-tad-shell` |
+## Status
 
----
+| Area | State |
+|---|---|
+| canvas (camera, clusters, snapping, bookmarks, suspend) | ✅ |
+| real Wayland clients, drag, 8-edge resize, maximize/minimize | ✅ verified live |
+| **X11 apps** (via `xwayland-satellite`) | ✅ verified live (`xterm`) |
+| shell in the compositor (panel, palette, help, HUD, toasts) | ✅ verified live |
+| session restore (dormant + slot adoption) | ✅ verified live |
+| **screenshots** (`wlr-screencopy`, `grim` inside) | ✅ verified live |
+| DRM/TTY backend | ⚠ layer 0 only (`--drm`: session + card + connector plan); rendering/page-flip pending |
+| `ext-idle-notify`, multi-monitor | ❌ needs the calloop transition / DRM |
 
-## Что есть vs чего нет
+## License
 
-**Есть (полноценная DE):**
-- ✅ Wayland-композитор (smithay 0.5 + DRM/KMS)
-- ✅ XDG shell (настоящие приложения как Wayland-клиенты)
-- ✅ Layer shell (waybar/top panel)
-- ✅ Foreign toplevel management (waybar taskbar)
-- ✅ Session lock protocol (swaylock/hyprlock)
-- ✅ Multi-output + hotplug (udev)
-- ✅ XWayland (X11 приложения)
-- ✅ libinput (клавиатура/мышь через evdev)
-- ✅ Бесконечный холст с pan/zoom, LOD
-- ✅ TAD-документы с undo/redo
-- ✅ 9 workspaces
-- ✅ App launcher (встроенный + rofi/wofi/fuzzel/walker/tofi/dmenu)
-- ✅ Top panel (встроенная + waybar/polybar/yambar)
-- ✅ Обои (swaybg/hyprpaper/wpaperd)
-- ✅ Уведомления (mako/dunst/fnott)
-- ✅ Буфер обмена (wl-clipboard + cliphist)
-- ✅ Idle management (swayidle/hypridle)
-- ✅ Polkit agent
-- ✅ XDG Desktop Portal
-- ✅ Session .desktop для GDM/SDDM/LightDM
-- ✅ Autostart скрипт
-- ✅ Конфиг TOML
-
-**Чего нет (требует доработки):**
-- ❌ DRM/TTY backend композитора (только winit+GLES прототип)
-- ❌ Полный window embedding в ZUI-холст (Wayland clients рендерятся отдельно)
-- ❌ Settings daemon (используйте swaybg/waybar/wl-clipboard)
-- ❌ System tray из коробки (через waybar module)
-- ❌ Accessibility (нужно реализовать отдельно)
-
-## Лицензия
-MIT OR Apache-2.0.
+MIT. See [LICENSE](LICENSE). Asset provenance: [assets/CREDITS.md](assets/CREDITS.md) —
+wallpapers are generated by our code; no third-party game assets are included.
