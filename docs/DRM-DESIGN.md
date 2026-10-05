@@ -83,6 +83,28 @@ calloop**: event-loop + сессия + udev + libinput + сокет + тайме
 5. Мультимонитор: по `DrmSurface` на crtc, у каждого свой viewport камеры.
 6. Hotplug: `UdevEvent::{Added, Changed, Removed}` (или ручной rescан `/dev/dri`).
 
+## Слой 1 (рендер) — где именно я встала
+
+Написан и **откачен** (не компилируется) код отправки кадра в dumb buffer.
+Выверенные по исходникам вызовы:
+
+| Шаг | Вызов |
+|---|---|
+| создать буфер | `Device::create_dumb_buffer((w,h), DrmFourcc::Xrgb8888, 32) -> io::Result<DumbBuffer>` |
+| замапить | `Device::map_dumb_buffer(&mut DumbBuffer) -> io::Result<DumbMapping>` (у `DumbMapping` есть `DerefMut<[u8]>` ✓) |
+| шаг строки | `drm::buffer::Buffer::pitch(&dumb)` (метод трейта, не поле) |
+| framebuffer | `drm::dumb::framebuffer_from_dumb_buffer(fd, &DumbBuffer, true)` |
+| плоскость | `DrmSurface::planes().primary[0].handle` + `PlaneState { handle, config: Some(PlaneConfig { src, dst, transform, alpha, damage_clips, fb, fence }) }` |
+| переключить | `DrmSurface::page_flip([PlaneState], true)` |
+
+**Блокер:** `framebuffer_from_dumb_buffer` принимает `DumbBuffer`, но `create_dumb_buffer`
+возвращает *другой* `DumbBuffer` (одноимённые типы из разных путей графа; компилятор
+не называет источник). Разбирать это вслепую бессмысленно: 5 компиляционных
+итераций ничего не говорят о рантайме. Нужен один прогон на живой DRM-сессии
+(или явное приведение типа через `drm_ffi`), и тогда путь A закроется за час:
+CPU-композитор уже готов (`crates/compositor/src/cpu.rs`), осталось только
+записать его в буфер и щёлкнуть `page_flip`.
+
 ## Что НЕ проверено в этом файле
 
 Ни одна строка пути A/B не запускалась: X11 держит DRM-master, свободного VT нет,
