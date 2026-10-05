@@ -206,8 +206,8 @@ DRM/TTY reconnaissance with verified signatures: [`docs/DRM-DESIGN.md`](docs/DRM
 | shell in the compositor (panel, palette, help, HUD, toasts) | ✅ verified live |
 | session restore (dormant + slot adoption) | ✅ verified live |
 | **screenshots** (`wlr-screencopy`, `grim` inside) | ✅ verified live |
-| DRM/TTY backend | ⚠ layer 0 only (`--drm`: session + card + connector plan); rendering/page-flip pending |
-| `ext-idle-notify`, multi-monitor | ❌ needs the calloop transition / DRM |
+| DRM/TTY backend | ⚠ layer 0 **verified live** (`--drm`: session, card, connectors); layer 1 **written & compiling** (`--drm-render`: dumb buffer + `page_flip`) — needs a real TTY to verify |
+| `ext-idle-notify`, TTY input, vblank sync, multi-monitor | ❌ one coherent piece of work: the calloop transition (details in `docs/ROADMAP.md`) |
 
 ## License
 
