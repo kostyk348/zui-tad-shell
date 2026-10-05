@@ -115,3 +115,174 @@ pub fn probe_and_plan() -> Result<usize> {
     }
     Ok(usable)
 }
+
+// ---------------------------------------------------------------- слой 1: рендер
+
+/// Отправить кадр холста на DRM-поверхность через dumb buffer.
+///
+/// Путь A (без GL): мы не регистрируем `zwp_linux_dmabuf`, клиенты рисуют в
+/// `wl_shm`, а композитор и так CPU (`crate::cpu::compose`). Здесь кадр
+/// копируется в память dumb-буфера и уходит в `page_flip`.
+///
+/// ⚠ Компилируется, но в рантайме НЕ проверено: в среде разработки X11 держит
+/// DRM-master и свободного VT нет. Это единственная проверка, возможная здесь.
+pub fn present_frame(
+    state: &mut crate::state::CompositorState,
+    device: &DrmDevice,
+    surface: &smithay::backend::drm::DrmSurface,
+    size: (u32, u32),
+) -> Result<()> {
+    use smithay::backend::drm::{PlaneConfig, PlaneState};
+    use smithay::reexports::drm::buffer::{Buffer as DrmBuffer, DrmFourcc};
+    use smithay::reexports::drm::control::Device as DrmControlDevice;
+    use smithay::utils::{Physical, Rectangle, Transform};
+
+    let (w, h) = (size.0.max(1), size.1.max(1));
+    let fd = device.device_fd();
+
+    // 1. Кадр на CPU — тот же композитор, что отдаёт screencopy.
+    let frame = crate::cpu::compose(state, (w, h));
+
+    // 2. Dumb buffer (drm-крейт: его буфер МАППИРУЕТСЯ, в отличие от
+    //    smithay::backend::allocator::dumb::DumbBuffer, у которого нет map).
+    let mut dumb = device
+        .create_dumb_buffer((w, h), DrmFourcc::Xrgb8888, 32)
+        .context("create_dumb_buffer")?;
+    let pitch = DrmBuffer::pitch(&dumb) as usize;
+    {
+        let mut map = device
+            .map_dumb_buffer(&mut dumb)
+            .context("map_dumb_buffer")?;
+        let src = frame.data();
+        for y in 0..h as usize {
+            let srow = y * w as usize * 4;
+            let drow = y * pitch;
+            for x in 0..w as usize {
+                let s = srow + x * 4;
+                let d = drow + x * 4;
+                if d + 2 < map.len() {
+                    // XRGB8888 в памяти — BGRA
+                    map[d] = src[s + 2];
+                    map[d + 1] = src[s + 1];
+                    map[d + 2] = src[s];
+                }
+            }
+        }
+    }
+
+    // 3. Framebuffer (drm-крейт умеет делать его прямо из DumbBuffer).
+    let fb = device
+        .add_framebuffer(&dumb, 24, 32)
+        .context("add_framebuffer")?;
+
+    // 4. Page-flip на primary-плоскости.
+    let planes = surface.planes();
+    let plane = planes.primary.first().context("нет primary-плоскости")?;
+    let cfg = PlaneConfig {
+        src: Rectangle::from_size((w as f64, h as f64).into()),
+        dst: Rectangle::<i32, Physical>::from_size((w as i32, h as i32).into()),
+        transform: Transform::Normal,
+        alpha: 1.0,
+        damage_clips: None,
+        fb,
+        fence: None,
+    };
+    surface
+        .page_flip(
+            [PlaneState {
+                handle: plane.handle,
+                config: Some(cfg),
+            }],
+            true,
+        )
+        .context("page_flip")?;
+    let _ = fd;
+    Ok(())
+}
+
+/// Слой 1: сессия + первый подключённый выход + цикл рендера.
+///
+/// Осознанные ограничения этой версии (и почему так):
+///   * НЕТ vblank-синхронизации: `DrmDeviceNotifier` — calloop-источник, а цикл
+///     у нас свой; кадры идут с фиксированным интервалом (возможен tearing);
+///   * НЕТ ввода: `LibinputInputBackend` — тоже calloop-источник;
+///   * один выход (первый подключённый), без hotplug.
+/// Всё это снимается переходом на calloop — см. docs/ROADMAP.md.
+///
+/// Запуск: `zui-compositor --drm-render` ИЗ TTY (забирает консоль!).
+pub fn run_drm_session(
+    store: std::sync::Arc<parking_lot::Mutex<tad_core::GraphStore>>,
+) -> Result<()> {
+    use smithay::reexports::drm::control::Device as DrmControlDevice;
+
+    let (mut session, _notifier) =
+        LibSeatSession::new().context("libseat (нужен seat/VT: запускать из TTY)")?;
+    tracing::info!(
+        "libseat: seat={}, active={}",
+        session.seat(),
+        session.is_active()
+    );
+
+    let path = card_paths()
+        .into_iter()
+        .next()
+        .context("нет /dev/dri/card*")?;
+    let fd = session
+        .open(&path, OFlags::RDWR | OFlags::CLOEXEC)
+        .with_context(|| format!("сессия не дала fd на {}", path.display()))?;
+    let (mut device, _dev_notifier) =
+        DrmDevice::new(DrmDeviceFd::new(fd.into()), false).context("DrmDevice::new")?;
+
+    // Первый подключённый коннектор и его предпочтительный режим.
+    let res = device.resource_handles().context("resource_handles")?;
+    let mut chosen: Option<(
+        smithay::reexports::drm::control::connector::Handle,
+        smithay::reexports::drm::control::Mode,
+    )> = None;
+    for c in &res.connectors {
+        if let Ok(info) = device.get_connector(*c, true) {
+            if info.state() == smithay::reexports::drm::control::connector::State::Connected {
+                if let Some(mode) = info.modes().first().copied() {
+                    chosen = Some((*c, mode));
+                    break;
+                }
+            }
+        }
+    }
+    let (connector, mode) = chosen.context("нет подключённого коннектора с режимом")?;
+    let crtc = res.crtcs.first().copied().context("нет crtc")?;
+    let surface = device
+        .create_surface(crtc, mode, &[connector])
+        .context("create_surface")?;
+    tracing::info!(
+        "TTY-сессия: {} режим {}x{}@{} — рендер пошёл (без vblank/ввода, см. ROADMAP)",
+        path.display(),
+        mode.size().0,
+        mode.size().1,
+        mode.vrefresh()
+    );
+
+    let mut display: smithay::reexports::wayland_server::Display<crate::state::CompositorState> =
+        smithay::reexports::wayland_server::Display::new()?;
+    let mut state = crate::state::CompositorState::new(&mut display, store);
+    state.set_viewport(mode.size().0 as u32, mode.size().1 as u32);
+
+    let frame_time = std::time::Duration::from_micros(16_666);
+    loop {
+        let t0 = std::time::Instant::now();
+        if let Err(e) = present_frame(
+            &mut state,
+            &device,
+            &surface,
+            (mode.size().0 as u32, mode.size().1 as u32),
+        ) {
+            tracing::warn!("present_frame: {e:#}");
+        }
+        let _ = display.dispatch_clients(&mut state);
+        let _ = display.flush_clients();
+        let spent = t0.elapsed();
+        if spent < frame_time {
+            std::thread::sleep(frame_time - spent);
+        }
+    }
+}

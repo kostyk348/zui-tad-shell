@@ -25,6 +25,19 @@ fn main() -> Result<()> {
         check();
         return Ok(());
     }
+    if std::env::args().any(|a| a == "--drm-render") {
+        // ЗАБИРАЕТ КОНСОЛЬ: только из TTY. Требует seat/VT.
+        #[cfg(feature = "smithay")]
+        {
+            let path = std::env::var("ZUI_STORE_PATH").unwrap_or_else(|_| "data/store.sled".into());
+            let _ = std::fs::create_dir_all("data");
+            let store = Arc::new(Mutex::new(GraphStore::open(&path)?));
+            compositor::drm::run_drm_session(store)?;
+        }
+        #[cfg(not(feature = "smithay"))]
+        println!("соберите с --features smithay");
+        return Ok(());
+    }
     if std::env::args().any(|a| a == "--drm") {
         // Слой 0 TTY-бэкенда: сессия + карта + план вывода.
         #[cfg(feature = "smithay")]
