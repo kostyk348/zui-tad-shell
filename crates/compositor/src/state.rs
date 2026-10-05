@@ -20,6 +20,7 @@ use smithay::{
         compositor::CompositorState as SmithayCompositorState,
         content_type::ContentTypeState,
         foreign_toplevel_list::{ForeignToplevelHandle, ForeignToplevelListState},
+        output::OutputManagerState,
         seat::WaylandFocus,
         selection::{data_device::DataDeviceState, primary_selection::PrimarySelectionState},
         session_lock::SessionLockManagerState,
@@ -92,6 +93,11 @@ pub struct CompositorState {
     pub single_pixel_buffer: SinglePixelBufferState,
     /// wp_content_type_v1 — клиенты сообщают «это видео/игра» (нужно для полноэкранного).
     pub content_type: ContentTypeState,
+    /// wlr-screencopy: очередь запросов на кадр (обрабатывается CPU-композитором).
+    pub screencopy: crate::screencopy::ScreencopyState,
+    /// Менеджер выходов + xdg-output: нужен клиентам (grim, wlr-randr), чтобы
+    /// узнать размеры выходов, а не «угадывать» их.
+    pub output_manager: OutputManagerState,
 
     pub seat_state: SeatState<CompositorState>,
     pub seat: Seat<CompositorState>,
@@ -173,6 +179,10 @@ impl CompositorState {
         let viewporter = ViewporterState::new::<CompositorState>(&display_handle);
         let single_pixel_buffer = SinglePixelBufferState::new::<CompositorState>(&display_handle);
         let content_type = ContentTypeState::new::<CompositorState>(&display_handle);
+        let screencopy =
+            crate::screencopy::ScreencopyState::new::<CompositorState>(&display_handle);
+        let output_manager =
+            OutputManagerState::new_with_xdg_output::<CompositorState>(&display_handle);
 
         let mut seat_state = SeatState::<CompositorState>::new();
         let seat = seat_state.new_wl_seat(&display_handle, "seat0");
@@ -195,6 +205,8 @@ impl CompositorState {
             viewporter,
             single_pixel_buffer,
             content_type,
+            screencopy,
+            output_manager,
             seat_state,
             seat,
             keyboard: None,
@@ -279,6 +291,12 @@ impl CompositorState {
 
     pub fn viewport(&self) -> cgmath::Vector2<u32> {
         self.camera.viewport
+    }
+
+    /// Размер вывода в физических пикселях (то, что отдаём клиентам).
+    pub fn output_size(&self) -> (i32, i32) {
+        let v = self.camera.viewport;
+        (v.x.max(1) as i32, v.y.max(1) as i32)
     }
 
     pub fn next_serial(&mut self) -> Serial {

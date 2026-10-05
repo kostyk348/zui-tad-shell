@@ -90,6 +90,36 @@ mod tests {
     }
 
     #[test]
+    fn raw_scaled_swaps_channels_and_scales() {
+        // источник 2x2 в BGRA: один пиксель — чистый красный (B=0,G=0,R=255)
+        let src: Vec<u8> = vec![
+            0, 0, 255, 255, 0, 0, 255, 255, 0, 0, 255, 255, 0, 0, 255, 255,
+        ];
+        let mut dst = pm(8, 8, [0, 0, 0, 255]);
+        blit_raw_scaled(&mut dst, &src, 2, 2, 8, 1, 1, 4, 4, true);
+        let c = dst.pixels()[2 * 8 + 2].demultiply();
+        assert_eq!(
+            [c.red(), c.green(), c.blue()],
+            [255, 0, 0],
+            "R/B поменяны местами"
+        );
+        // вне прямоугольника не тронуто
+        let c0 = dst.pixels()[0].demultiply();
+        assert_eq!(c0.red(), 0);
+    }
+
+    #[test]
+    fn raw_scaled_clips_and_never_panics() {
+        let src: Vec<u8> = vec![9; 4 * 4 * 4];
+        let mut dst = pm(4, 4, [0, 0, 0, 255]);
+        for (x, y, w, h) in [(-3, -3, 8, 8), (3, 3, 8, 8), (0, 0, 0, 0), (99, 0, 4, 4)] {
+            blit_raw_scaled(&mut dst, &src, 4, 4, 16, x, y, w, h, false);
+        }
+        // короткий буфер — не паникуем
+        blit_raw_scaled(&mut dst, &[1, 2], 4, 4, 16, 0, 0, 4, 4, false);
+    }
+
+    #[test]
     fn blit_outside_or_empty_is_noop() {
         let mut dst = pm(10, 10, [1, 2, 3, 255]);
         let before = dst.data().to_vec();
@@ -98,5 +128,60 @@ mod tests {
         blit(&mut dst, &src, 0, 20);
         blit(&mut dst, &src, -6, 0);
         assert_eq!(dst.data(), before.as_slice());
+    }
+}
+
+/// Блит «сырого» буфера клиента (BGRA/XRGB или RGBA) в пиксмап с масштабом.
+///
+/// Клиенты Wayland отдают shm в BGRA-порядке (Xrgb8888/Argb8888), поэтому
+/// `swap_rb` по умолчанию нужен; масштаб — ближайший сосед (для скриншота
+/// и для TTY-пути этого достаточно, а билинейка тут дороже пользы).
+#[allow(clippy::too_many_arguments)]
+pub fn blit_raw_scaled(
+    dst: &mut Pixmap,
+    src: &[u8],
+    src_w: u32,
+    src_h: u32,
+    src_stride: usize,
+    dst_x: i32,
+    dst_y: i32,
+    dst_w: u32,
+    dst_h: u32,
+    swap_rb: bool,
+) {
+    if src_w == 0 || src_h == 0 || dst_w == 0 || dst_h == 0 || src.len() < 4 {
+        return;
+    }
+    let (dw, dh) = (dst.width() as i32, dst.height() as i32);
+    let x0 = dst_x.max(0);
+    let y0 = dst_y.max(0);
+    let x1 = (dst_x + dst_w as i32).min(dw);
+    let y1 = (dst_y + dst_h as i32).min(dh);
+    if x0 >= x1 || y0 >= y1 {
+        return;
+    }
+    let dstride = dst.width() as usize;
+    let dst_px = dst.pixels_mut();
+    for py in y0..y1 {
+        // координата в источнике (ближайший сосед)
+        let sy = (((py - dst_y) as u64 * src_h as u64) / dst_h as u64) as usize;
+        let sy = sy.min(src_h as usize - 1);
+        let row = sy * src_stride;
+        for px in x0..x1 {
+            let sx = (((px - dst_x) as u64 * src_w as u64) / dst_w as u64) as usize;
+            let sx = sx.min(src_w as usize - 1);
+            let i = row + sx * 4;
+            if i + 3 >= src.len() {
+                continue;
+            }
+            let (r, g, b, a) = if swap_rb {
+                (src[i + 2], src[i + 1], src[i], 255)
+            } else {
+                (src[i], src[i + 1], src[i + 2], src[i + 3])
+            };
+            if let Some(c) = PremultipliedColorU8::from_rgba(r, g, b, a) {
+                dst_px[py as usize * dstride + px as usize] = c;
+            }
+        }
     }
 }

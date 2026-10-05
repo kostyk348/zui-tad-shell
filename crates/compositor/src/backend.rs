@@ -310,6 +310,10 @@ fn run_winit_backend(store: Arc<Mutex<GraphStore>>) -> Result<()> {
             );
         }
 
+        // wlr-screencopy: если кто-то просил кадр — собрать CPU-композитором
+        // и отдать (до flush, чтобы ready ушёл этим же кругом).
+        crate::screencopy::process(&mut state);
+
         display.dispatch_clients(&mut state)?;
         display.flush_clients()?;
         backend

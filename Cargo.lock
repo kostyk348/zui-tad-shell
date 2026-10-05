@@ -324,6 +324,7 @@ dependencies = [
  "tracing-subscriber",
  "uuid",
  "wayland-protocols",
+ "wayland-protocols-wlr",
  "wayland-server",
  "winit",
 ]

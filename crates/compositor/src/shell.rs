@@ -116,6 +116,16 @@ impl ShellLayer {
         }
     }
 
+    /// Шрифты оболочки (нужны CPU-композитору для плейсхолдеров).
+    pub fn fonts(&self) -> Option<&Fonts> {
+        self.fonts.as_ref()
+    }
+
+    /// Метрики оболочки.
+    pub fn metrics(&self) -> Metrics {
+        self.metrics
+    }
+
     pub fn save(&mut self) {
         self.cfg.theme = match self.mode {
             Mode::Rig => "rig",
@@ -175,7 +185,7 @@ impl ShellLayer {
         true
     }
 
-    fn render(&self, ctx: &ShellCtx) -> Pixmap {
+    pub fn render(&self, ctx: &ShellCtx) -> Pixmap {
         let (w, h) = (ctx.w, ctx.h);
         let mut pm = Pixmap::new(w, h).unwrap();
         let Some(fonts) = &self.fonts else {
