@@ -8,11 +8,17 @@ cd "$(dirname "$0")/.."
 export XDG_RUNTIME_DIR="${XDG_RUNTIME_DIR:-/run/user/$(id -u)}"
 OUT=/tmp/zui-test; mkdir -p "$OUT"
 BIN=./target/release/zui-compositor
-if [ ! -x "$BIN" ]; then
-  echo "сначала собери: cargo build --release -p compositor --features smithay --bin zui-compositor"
-  exit 1
+# Авто-пересборка: бинарь старше исходников — значит он устарел (грабля «check != build»).
+if [ ! -x "$BIN" ] || [ -n "$(find crates -name '*.rs' -newer "$BIN" -print -quit 2>/dev/null)" ]; then
+  echo "== бинарь устарел или отсутствует — собираю =="
+  cargo build --release -p compositor --features smithay --bin zui-compositor || exit 1
 fi
 
+if [ -z "${DISPLAY:-}" ] && [ -z "${WAYLAND_DISPLAY:-}" ]; then
+  echo "нет ни DISPLAY, ни WAYLAND_DISPLAY — вложенный режим (winit) тут не заведётся."
+  echo "запусти этот скрипт ИЗ ГРАФИЧЕСКОЙ СЕССИИ (в окне терминала), а из TTY используй ./scripts/test-tty.sh"
+  exit 2
+fi
 ZUI_STORE_PATH="$PWD/data/store.sled" setsid "$BIN" >"$OUT/compositor.log" 2>&1 </dev/null &
 COMP=$!
 trap 'kill $COMP ${K:-} ${X:-} ${XT:-} 2>/dev/null; echo; echo "остановлено"; exit 0' INT TERM

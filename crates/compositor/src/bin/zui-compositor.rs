@@ -17,6 +17,15 @@ use std::sync::Arc;
 use tad_core::GraphStore;
 
 fn main() -> Result<()> {
+    if std::env::args().any(|a| a == "--help" || a == "-h") {
+        println!("ZUI-TAD compositor");
+        println!("  (без флагов)      вложенный режим (окно поверх текущей сессии)");
+        println!("  --check           готовность к настоящей сессии (ничего не захватывает)");
+        println!("  --probe           /dev/dri, коннекторы, устройства ввода");
+        println!("  --drm             TTY слой 0: сессия + карта + план вывода (безопасно)");
+        println!("  --drm-render      TTY слой 1: рендер холста на выход (ЗАБИРАЕТ КОНСОЛЬ, только из TTY)");
+        return Ok(());
+    }
     if std::env::args().any(|a| a == "--probe") {
         probe();
         return Ok(());
