@@ -5,6 +5,8 @@
 ![license](https://img.shields.io/badge/license-MIT-blue)
 ![render](https://img.shields.io/badge/render-CPU%20%C2%B7%2060fps-orange)
 ![platform](https://img.shields.io/badge/platform-Linux%20(Wayland%20%2B%20X11)-lightgrey)
+[![Release](https://img.shields.io/github/v/release/kostyk348/zui-tad-shell?sort=semver&color=blue)](https://github.com/kostyk348/zui-tad-shell/releases)
+[![Last commit](https://img.shields.io/github/last-commit/kostyk348/zui-tad-shell?branch=master)](https://github.com/kostyk348/zui-tad-shell/commits/master)
 
 **ZUI-TAD** is a desktop that throws away workspaces and tiling. Windows keep
 their **native size on an infinite 2D canvas**, and your screen is a **camera**
