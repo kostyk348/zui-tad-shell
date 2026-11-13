@@ -1,12 +1,24 @@
+<div align="center">
+
+<img src="docs/banner.svg" alt="zui-tad-shell banner" width="1000">
+
 # ZUI-TAD Shell — an infinite-canvas Wayland desktop
 
+### Infinite-canvas Wayland desktop: windows on an endless 2D canvas + phosphor-CRT shell (Dead Space RIG × Signalis vibe), pure-CPU renderer at 60 fps
+
 [![CI](https://github.com/kostyk348/zui-tad-shell/actions/workflows/ci.yml/badge.svg)](https://github.com/kostyk348/zui-tad-shell/actions/workflows/ci.yml)
+[![Release](https://img.shields.io/github/v/release/kostyk348/zui-tad-shell?sort=semver&color=blue)](https://github.com/kostyk348/zui-tad-shell/releases)
+[![Last commit](https://img.shields.io/github/last-commit/kostyk348/zui-tad-shell?branch=master)](https://github.com/kostyk348/zui-tad-shell/commits/master)
+
 ![tests](https://img.shields.io/badge/tests-123%20passing-brightgreen)
 ![license](https://img.shields.io/badge/license-MIT-blue)
 ![render](https://img.shields.io/badge/render-CPU%20%C2%B7%2060fps-orange)
 ![platform](https://img.shields.io/badge/platform-Linux%20(Wayland%20%2B%20X11)-lightgrey)
-[![Release](https://img.shields.io/github/v/release/kostyk348/zui-tad-shell?sort=semver&color=blue)](https://github.com/kostyk348/zui-tad-shell/releases)
-[![Last commit](https://img.shields.io/github/last-commit/kostyk348/zui-tad-shell?branch=master)](https://github.com/kostyk348/zui-tad-shell/commits/master)
+
+</div>
+
+---
+
 
 **ZUI-TAD** is a desktop that throws away workspaces and tiling. Windows keep
 their **native size on an infinite 2D canvas**, and your screen is a **camera**
