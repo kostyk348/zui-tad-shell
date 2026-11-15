@@ -344,7 +344,7 @@ impl CompositorState {
             .find(|w| w.suspended && w.app_id == app_id)
             .map(|w| (w.id, w.pos, w.size));
         let pos = match adopted {
-            Some((old_id, p, s)) => {
+            Some((old_id, p, _s)) => {
                 self.canvas.remove(old_id);
                 tracing::info!("adopted session slot for app_id={app_id}");
                 p

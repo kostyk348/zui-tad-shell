@@ -9,7 +9,7 @@
 //!
 //! Здесь нет DRM/TTY: это вложенный (nested) бэкенд для разработки.
 
-use crate::shell::{ShellCtx, ShellKey};
+use crate::shell::ShellCtx;
 use crate::state::{ClientData, CompositorState};
 use ::winit::window::CursorIcon;
 use anyhow::Result;
@@ -33,7 +33,7 @@ use smithay::{
             },
             gles::GlesRenderer,
             utils::draw_render_elements,
-            Color32F, Frame, ImportMem, Renderer,
+            Color32F, Frame, Renderer,
         },
         winit::{self, WinitEvent},
     },
@@ -42,7 +42,7 @@ use smithay::{
         pointer::{ButtonEvent, MotionEvent, PointerHandle},
     },
     reexports::wayland_server::Display,
-    utils::{Buffer, Logical, Point, Rectangle, Size, Transform},
+    utils::{Logical, Point, Rectangle, Size, Transform},
     wayland::{
         compositor::{with_surface_tree_downward, SurfaceAttributes, TraversalAction},
         seat::WaylandFocus,
@@ -489,7 +489,7 @@ fn run_winit_backend(store: Arc<Mutex<GraphStore>>) -> Result<()> {
         if iterations == 1 {
             tracing::info!("render loop entered (first iteration)");
         }
-        if iterations % 120 == 0 {
+        if iterations.is_multiple_of(120) {
             let rects: Vec<String> = state
                 .canvas
                 .windows()
@@ -784,7 +784,7 @@ fn set_hover_cursor(state: &CompositorState, win: &::winit::window::Window) {
     win.set_cursor_visible(true);
     // Клиент попросил именованный курсор (cursor-shape-v1) — уважаем его.
     if let Some(named) = state.cursor_named {
-        win.set_cursor_icon(named);
+        win.set_cursor(named);
         return;
     }
     let icon = if let Some(h) = state.interact.resize_handle() {
@@ -802,7 +802,7 @@ fn set_hover_cursor(state: &CompositorState, win: &::winit::window::Window) {
             None => CursorIcon::Default,
         }
     };
-    win.set_cursor_icon(icon);
+    win.set_cursor(icon);
 }
 
 /// Хендл ресайза → системный курсор (winit реэкспортирует cursor-icon).
@@ -1052,33 +1052,8 @@ fn send_frames_surface_tree(surface: &WlSurface, time: u32) {
     );
 }
 
-/// Клавиша → действие оболочки (если она это действие забирает).
-fn shell_key_for(sym: u32, logo: bool) -> Option<ShellKey> {
-    use keysyms::*;
-    Some(match sym {
-        KEY_Up => ShellKey::Up,
-        KEY_Down => ShellKey::Down,
-        KEY_Return | KEY_KP_Enter => ShellKey::Enter,
-        KEY_Escape => ShellKey::Esc,
-        // Esc вне меню снимает граб (страховка от залипшего drag/pan)
-        KEY_BackSpace => ShellKey::Backspace,
-        KEY_F1 | KEY_Help => ShellKey::ToggleHelp,
-        KEY_F2 => ShellKey::ToggleHud,
-        KEY_F3 => ShellKey::ToggleFocus,
-        KEY_F6 => ShellKey::NextQuality,
-        KEY_F12 | KEY_Menu => ShellKey::ToggleMenu,
-        _ if logo && (sym == KEY_d || sym == KEY_slash) => ShellKey::ToggleMenu,
-        _ => {
-            // буквы/цифры — только когда меню открыто (иначе уходят в приложение)
-            let c = char::from_u32(sym).filter(|c| c.is_ascii_graphic() || *c == ' ');
-            return c.map(ShellKey::Char);
-        }
-    })
-}
-
 /// Выполнить действие меню в композиторе.
 fn dispatch_action(state: &mut CompositorState, action: Action) {
-    use phosphor::menu::ThemeId;
     tracing::info!("shell action: {}", crate::shell::action_name(&action));
     match action {
         Action::SetTheme(t) => state.shell.set_theme(t),

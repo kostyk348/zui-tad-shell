@@ -177,7 +177,7 @@ pub fn process(state: &mut CompositorState) {
     }
     let (w, h) = state.output_size();
     let frame_pm = crate::cpu::compose(state, (w.max(1) as u32, h.max(1) as u32));
-    let queued: Vec<CaptureRequest> = state.screencopy.queue.drain(..).collect();
+    let queued: Vec<CaptureRequest> = std::mem::take(&mut state.screencopy.queue);
     for req in queued {
         if crate::cpu::write_into_shm(&req.buffer, &frame_pm, req.region) {
             if req.with_damage && req.frame.version() >= 2 {

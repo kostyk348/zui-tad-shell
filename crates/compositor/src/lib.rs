@@ -64,7 +64,7 @@ smithay::delegate_idle_notify!(CompositorState);
 pub fn run_compositor(store: Arc<Mutex<GraphStore>>, embedded: bool) -> Result<()> {
     #[cfg(feature = "smithay")]
     {
-        return backend::run_compositor(store, embedded);
+        backend::run_compositor(store, embedded)
     }
 
     #[cfg(not(feature = "smithay"))]
