@@ -110,6 +110,27 @@ pub struct Aabb {
     pub max: Point2<f32>,
 }
 
+impl Aabb {
+    pub fn contains(&self, p: Point2<f32>) -> bool {
+        p.x >= self.min.x && p.x <= self.max.x && p.y >= self.min.y && p.y <= self.max.y
+    }
+
+    /// Пересечение с другим AABB (для culling).
+    pub fn intersects(&self, other: &Aabb) -> bool {
+        !(other.max.x < self.min.x
+            || other.min.x > self.max.x
+            || other.max.y < self.min.y
+            || other.min.y > self.max.y)
+    }
+
+    pub fn from_rect(x: f32, y: f32, w: f32, h: f32) -> Self {
+        Self {
+            min: Point2::new(x, y),
+            max: Point2::new(x + w, y + h),
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -171,26 +192,5 @@ mod tests {
         assert!((v.max.x - v.min.x - 200.0).abs() < 1e-3);
         assert!((v.max.y - v.min.y - 150.0).abs() < 1e-3);
         assert!(v.contains(Point2::new(100.0, 100.0)));
-    }
-}
-
-impl Aabb {
-    pub fn contains(&self, p: Point2<f32>) -> bool {
-        p.x >= self.min.x && p.x <= self.max.x && p.y >= self.min.y && p.y <= self.max.y
-    }
-
-    /// Пересечение с другим AABB (для culling).
-    pub fn intersects(&self, other: &Aabb) -> bool {
-        !(other.max.x < self.min.x
-            || other.min.x > self.max.x
-            || other.max.y < self.min.y
-            || other.min.y > self.max.y)
-    }
-
-    pub fn from_rect(x: f32, y: f32, w: f32, h: f32) -> Self {
-        Self {
-            min: Point2::new(x, y),
-            max: Point2::new(x + w, y + h),
-        }
     }
 }

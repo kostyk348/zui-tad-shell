@@ -255,8 +255,10 @@ mod tests {
 
     #[test]
     fn future_version_is_refused_and_garbage_ignored() {
-        let mut snap = Session::default();
-        snap.version = SESSION_VERSION + 1;
+        let snap = Session {
+            version: SESSION_VERSION + 1,
+            ..Session::default()
+        };
         assert!(
             Session::from_json(&snap.to_json()).is_none(),
             "чужая версия — не грузим"
