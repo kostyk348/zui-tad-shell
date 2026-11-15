@@ -390,13 +390,13 @@ mod tests {
     #[test]
     fn clip_segment_handles_all_cases() {
         // целиком внутри — без изменений
-        let (a, b, c, d) = clip_segment(2.0, 3.0, 8.0, 9.0, 16.0, 16.0).unwrap();
+        let (a, _b, _c, d) = clip_segment(2.0, 3.0, 8.0, 9.0, 16.0, 16.0).unwrap();
         assert!((a - 2.0).abs() < 1e-3 && (d - 9.0).abs() < 1e-3);
         // целиком снаружи — отбрасывается
         assert_eq!(clip_segment(-40.0, -40.0, -30.0, -30.0, 16.0, 16.0), None);
         assert_eq!(clip_segment(50.0, 5.0, 60.0, 9.0, 16.0, 16.0), None);
         // пересекает границу — обрезается внутрь
-        let (x1, y1, x2, y2) = clip_segment(-100.0, 8.0, 100.0, 8.0, 16.0, 16.0).unwrap();
+        let (x1, y1, x2, _y2) = clip_segment(-100.0, 8.0, 100.0, 8.0, 16.0, 16.0).unwrap();
         assert!(x1 >= 0.0 && x2 <= 16.0 && (y1 - 8.0).abs() < 1e-3);
     }
 

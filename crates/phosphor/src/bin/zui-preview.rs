@@ -931,7 +931,7 @@ impl App {
 
         // Нижняя строка подсказок: шелл должен объяснять себя сам.
         if !self.focus_mode {
-            let hint = if self.menu.is_some() {
+            let _hint = if self.menu.is_some() {
                 ": фильтр · ↑↓ выбор · ENTER выполнить · ESC закрыть"
             } else if self.help {
                 "ESC — вернуться"

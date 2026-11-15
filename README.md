@@ -210,12 +210,32 @@ Details and invariants: [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md).
 What is done, what is not, and why: [`docs/ROADMAP.md`](docs/ROADMAP.md).
 DRM/TTY reconnaissance with verified signatures: [`docs/DRM-DESIGN.md`](docs/DRM-DESIGN.md).
 
+## Window chrome on the canvas
+
+A window without a frame is just pixels: on an endless canvas you cannot see where it ends, what
+it is, or which one has focus. Clients are asked for CSD (`xdg-decoration`), so the server draws
+its own chrome right above each window, in z-order, between the client surfaces and the shell:
+
+* a thin border — amber for the focused window, dim for the rest;
+* a title strip above the window: client title (or `app_id`), the logical size, and the camera zoom
+  when it is not 1:1;
+* the strip is draggable — pressing it moves the window exactly like pressing the body, so
+  "grab the title" works the way every other desktop trained you;
+* strips are cached per window and re-rasterised only when the title, focus, or width changes:
+  a 900×600 window does not re-layout text sixty times a second.
+
+![window chrome](docs/shots/chrome-frames.png)
+
+The chrome lives in `phosphor::chrome` (pure `tiny_skia`, three unit tests) and is composited by
+`crates/compositor/src/backend.rs` — the same `MemoryRenderBuffer` path as the panel and HUD.
+
 ## Status
 
 | Area | State |
 |---|---|
 | canvas (camera, clusters, snapping, bookmarks, suspend) | ✅ |
 | real Wayland clients, drag, 8-edge resize, maximize/minimize | ✅ verified live |
+| **window chrome** (server-side frame, title bar, focus, size badge, drag by title) | ✅ verified live |
 | **X11 apps** (via `xwayland-satellite`) | ✅ verified live (`xterm`) |
 | shell in the compositor (panel, palette, help, HUD, toasts) | ✅ verified live |
 | session restore (dormant + slot adoption) | ✅ verified live |

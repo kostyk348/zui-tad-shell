@@ -91,6 +91,7 @@ fn noise_tile() -> &'static [u8; 65536] {
 }
 
 #[inline]
+#[allow(dead_code)] // оставлена как парная к `px_get`; используется в отладочных прогонах
 fn px_set(p: &mut PremultipliedColorU8, r: u8, g: u8, b: u8) {
     if let Some(v) = PremultipliedColorU8::from_rgba(r, g, b, 255) {
         *p = v;
@@ -136,12 +137,12 @@ pub fn crt(pm: &mut Pixmap, p: &CrtParams) {
                 s.spawn(move || {
                     let q = (levels.max(2) - 1) as f32;
                     let keep = 1.0 - scanline.clamp(0.0, 1.0);
-                    let quant = levels >= 2 && levels < 255;
+                    let quant = (2..255).contains(&levels);
                     for (r, row) in band.chunks_mut(w * 4).enumerate() {
                         let y = y0 + r;
                         let dark = scanline > 0.0 && (y as u32) % period == 1;
                         let dy = y as f32 - cy;
-                        for (x, px) in row.chunks_exact_mut(4).enumerate() {
+                        for (x, px) in row.as_chunks_mut::<4>().0.iter_mut().enumerate() {
                             let (mut rr, mut gg, mut bb) =
                                 (px[0] as f32, px[1] as f32, px[2] as f32);
                             if quant {

@@ -237,7 +237,7 @@ dependencies = [
 
 [[package]]
 name = "canvas-engine"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "ahash",
  "anyhow",
@@ -306,7 +306,7 @@ dependencies = [
 
 [[package]]
 name = "compositor"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "ahash",
  "anyhow",
@@ -419,7 +419,7 @@ checksum = "f27ae1dd37df86211c42e150270f82743308803d90a6f6e6651cd730d5e1732f"
 
 [[package]]
 name = "de-common"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "cgmath",
  "chrono",
@@ -1481,7 +1481,7 @@ checksum = "9b4f627cb1b25917193a259e49bdad08f671f8d9708acfd5fe0a8c1455d87220"
 
 [[package]]
 name = "phosphor"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "ab_glyph",
  "ahash",
@@ -2097,7 +2097,7 @@ dependencies = [
 
 [[package]]
 name = "tad-core"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "ahash",
  "anyhow",

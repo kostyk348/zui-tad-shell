@@ -12,6 +12,7 @@
 
 pub mod bg;
 pub mod blit;
+pub mod chrome;
 pub mod config;
 pub mod demo;
 pub mod fx;

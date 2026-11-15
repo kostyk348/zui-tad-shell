@@ -13,10 +13,11 @@ use crate::shell::{ShellCtx, ShellKey};
 use crate::state::{ClientData, CompositorState};
 use ::winit::window::CursorIcon;
 use anyhow::Result;
-use canvas_engine::{layout_windows, Dir, Mode, ResizeHandle, WindowId};
+use canvas_engine::{layout_windows, Dir, Mode, ResizeHandle, WindowId, WindowQuad};
 use cgmath::Point2;
 use parking_lot::Mutex;
 use phosphor::menu::Action;
+use phosphor::theme::Palette;
 use smithay::{
     backend::{
         input::{
@@ -25,7 +26,8 @@ use smithay::{
         },
         renderer::{
             element::{
-                memory::MemoryRenderBufferRenderElement,
+                memory::{MemoryRenderBuffer, MemoryRenderBufferRenderElement},
+                solid::{SolidColorBuffer, SolidColorRenderElement},
                 surface::{render_elements_from_surface_tree, WaylandSurfaceRenderElement},
                 Kind,
             },
@@ -46,6 +48,7 @@ use smithay::{
         seat::WaylandFocus,
     },
 };
+use std::collections::HashMap;
 use std::sync::Arc;
 use tad_core::GraphStore;
 use tracing_subscriber::EnvFilter;
@@ -65,6 +68,180 @@ pub fn run_compositor(store: Arc<Mutex<GraphStore>>, _embedded: bool) -> Result<
         .ok();
 
     run_winit_backend(store)
+}
+
+/// Одна полоса заголовка в GL плюс ключ, по которому её можно переиспользовать.
+struct CachedStrip {
+    title: String,
+    app_id: String,
+    focused: bool,
+    logical_w: u32,
+    buffer: MemoryRenderBuffer,
+}
+
+/// Кэш рамок: перерисовываем полосу только когда изменились заголовок, фокус или
+/// ширина окна. Иначе 900×600-окно каждый кадр стоило бы растеризации текста.
+#[derive(Default)]
+struct ChromeCache {
+    strips: HashMap<WindowId, CachedStrip>,
+}
+
+/// Построить элементы рамок в z-порядке окон: контур каждого окна и полосу заголовка.
+///
+/// Рисуем в два слоя, потому что элементы разных типов: контур — `SolidColorRenderElement`,
+/// полоса — `MemoryRenderBufferRenderElement`. Оба слоя рисуются ДО оболочки, но ПОСЛЕ
+/// поверхностей клиентов, поэтому рамка честно принадлежит своему окну.
+#[allow(clippy::type_complexity)]
+fn build_chrome(
+    renderer: &mut GlesRenderer,
+    state: &CompositorState,
+    quads: &[WindowQuad],
+    cache: &mut ChromeCache,
+    palette: &Palette,
+    fonts: &phosphor::widgets::Fonts,
+) -> (
+    Vec<SolidColorRenderElement>,
+    Vec<MemoryRenderBufferRenderElement<GlesRenderer>>,
+    Vec<SolidColorBuffer>,
+) {
+    let mut borders: Vec<SolidColorRenderElement> = Vec::new();
+    let mut strips: Vec<MemoryRenderBufferRenderElement<GlesRenderer>> = Vec::new();
+    // Буферы контура обязаны жить до отрисовки: элемент держит на них ссылку.
+    let mut border_bufs: Vec<SolidColorBuffer> = Vec::new();
+
+    let focus = state.canvas.focus();
+    for q in quads {
+        if q.suspended || q.zoom < 0.22 {
+            continue; // слишком мелко: полоса превратится в мусор из пикселей
+        }
+        let (x, y, w, h, z) = (q.quad.x, q.quad.y, q.quad.w, q.quad.h, q.zoom);
+        if w < 24.0 || h < 16.0 {
+            continue;
+        }
+        let win = state.canvas.windows().iter().find(|w| w.id == q.id);
+        let title = win.map(|w| w.title.clone()).unwrap_or_default();
+        let app_id = win.map(|w| w.app_id.clone()).unwrap_or_default();
+        let focused = focus == Some(q.id);
+
+        // Контур: 4 тонких прямоугольника вокруг содержимого.
+        let t = (1.5 * z).round().clamp(1.0, 4.0);
+        let color = if focused {
+            let [r, g, b, _] = palette.primary;
+            Color32F::new(r as f32 / 255.0, g as f32 / 255.0, b as f32 / 255.0, 0.95)
+        } else {
+            let [r, g, b, _] = palette.dim;
+            Color32F::new(r as f32 / 255.0, g as f32 / 255.0, b as f32 / 255.0, 0.55)
+        };
+        let edges = [
+            (x - t, y - t, w + 2.0 * t, t), // верх
+            (x - t, y + h, w + 2.0 * t, t), // низ
+            (x - t, y, t, h),               // лево
+            (x + w, y, t, h),               // право
+        ];
+        for (ex, ey, ew, eh) in edges {
+            let buf = SolidColorBuffer::new(
+                ((ew.max(1.0).round() as i32), (eh.max(1.0).round() as i32)),
+                color,
+            );
+            borders.push(SolidColorRenderElement::from_buffer(
+                &buf,
+                (ex.round() as i32, ey.round() as i32),
+                1.0,
+                1.0,
+                Kind::Unspecified,
+            ));
+            border_bufs.push(buf);
+        }
+
+        // Полоса заголовка: буфер в логических пикселях, масштабируется камерой.
+        let logical_w = ((w / z).round() as u32).clamp(48, 4096);
+        let reuse = cache
+            .strips
+            .get(&q.id)
+            .map(|c| {
+                c.title == title
+                    && c.app_id == app_id
+                    && c.focused == focused
+                    && c.logical_w == logical_w
+            })
+            .unwrap_or(false);
+        if !reuse {
+            let strip_px = phosphor::chrome::STRIP_H as u32;
+            let mut pm = match tiny_skia::Pixmap::new(logical_w, strip_px) {
+                Some(pm) => pm,
+                None => continue,
+            };
+            phosphor::chrome::render(
+                &mut pm,
+                fonts,
+                palette,
+                &phosphor::chrome::Spec {
+                    title: &title,
+                    app_id: &app_id,
+                    focused,
+                    size: (w / z, h / z),
+                    zoom: z,
+                },
+            );
+            let mut buffer = MemoryRenderBuffer::new(
+                smithay::backend::allocator::Fourcc::Argb8888,
+                (logical_w as i32, strip_px as i32),
+                1,
+                smithay::utils::Transform::Normal,
+                None,
+            );
+            let data = pm.data();
+            let _ = buffer.render().draw(|mem: &mut [u8]| {
+                if mem.len() >= data.len() {
+                    for i in (0..data.len()).step_by(4) {
+                        mem[i] = data[i + 2];
+                        mem[i + 1] = data[i + 1];
+                        mem[i + 2] = data[i];
+                        mem[i + 3] = data[i + 3];
+                    }
+                }
+                Ok::<_, std::convert::Infallible>(vec![Rectangle::from_size(Size::<
+                    i32,
+                    smithay::utils::Buffer,
+                >::from(
+                    (
+                    logical_w as i32,
+                    strip_px as i32,
+                )
+                ))])
+            });
+            cache.strips.insert(
+                q.id,
+                CachedStrip {
+                    title,
+                    app_id,
+                    focused,
+                    logical_w,
+                    buffer,
+                },
+            );
+        }
+        if let Some(cached) = cache.strips.get(&q.id) {
+            if let Ok(el) = MemoryRenderBufferRenderElement::from_buffer(
+                renderer,
+                Point::<f64, smithay::utils::Physical>::from((
+                    x.round() as f64,
+                    (y - phosphor::chrome::STRIP_H * z).round() as f64,
+                )),
+                &cached.buffer,
+                Some(z),
+                None,
+                Some(Size::<i32, smithay::utils::Logical>::from((
+                    logical_w as i32,
+                    phosphor::chrome::STRIP_H as i32,
+                ))),
+                Kind::Unspecified,
+            ) {
+                strips.push(el);
+            }
+        }
+    }
+    (borders, strips, border_bufs)
 }
 
 fn run_winit_backend(store: Arc<Mutex<GraphStore>>) -> Result<()> {
@@ -103,6 +280,7 @@ fn run_winit_backend(store: Arc<Mutex<GraphStore>>) -> Result<()> {
 
     let start_time = std::time::Instant::now();
     let mut iterations: u64 = 0;
+    let mut chrome_cache = ChromeCache::default();
 
     loop {
         let frame_t0 = std::time::Instant::now();
@@ -123,6 +301,21 @@ fn run_winit_backend(store: Arc<Mutex<GraphStore>>) -> Result<()> {
 
         // 1. Холст → экран.
         let quads = layout_windows(&state.canvas, &state.camera, state.viewport());
+
+        // 1а. Рамки окон (контур + полоса заголовка) — в z-порядке окон, до оболочки.
+        let palette = Palette::of(state.shell.mode);
+        let fonts = state.shell.fonts();
+        let (borders, strips, _border_bufs) = match fonts {
+            Some(fonts) => build_chrome(
+                backend.renderer(),
+                &state,
+                &quads,
+                &mut chrome_cache,
+                &palette,
+                fonts,
+            ),
+            None => (Vec::new(), Vec::new(), Vec::new()),
+        };
 
         // 2. Render elements: позиция квада + масштаб камеры.
         let mut elements: Vec<WaylandSurfaceRenderElement<GlesRenderer>> = Vec::new();
@@ -262,6 +455,15 @@ fn run_winit_backend(store: Arc<Mutex<GraphStore>>) -> Result<()> {
             .map_err(|e| anyhow::anyhow!("clear: {e}"))?;
         draw_render_elements(&mut frame, 1.0, &elements, &[damage])
             .map_err(|e| anyhow::anyhow!("draw: {e}"))?;
+        // Рамки окон: контур, затем полосы заголовков (поверх содержимого, под оболочкой).
+        if !borders.is_empty() {
+            let _ =
+                draw_render_elements::<GlesRenderer, f64, _>(&mut frame, 1.0, &borders, &[damage]);
+        }
+        if !strips.is_empty() {
+            let _ =
+                draw_render_elements::<GlesRenderer, f64, _>(&mut frame, 1.0, &strips, &[damage]);
+        }
         // Оболочка — поверх окон (панель/HUD/меню).
         if let Some(el) = shell_el {
             let _ = draw_render_elements(&mut frame, 1.0, &[el], &[damage]);
@@ -522,10 +724,35 @@ fn on_primary_press(
             }
         }
         None => {
+            // Полоса заголовка лежит НАД прямоугольником окна, поэтому hit_test её не видит.
+            // Проверяем точку, сдвинутую вниз на высоту полосы: тащить окно за заголовок
+            // должно работать так же, как за тело.
+            if let Some(id) = hit_title_strip(state, canvas_pt) {
+                state.focus_window(id, serial);
+                let now = std::time::Instant::now();
+                let double = matches!(
+                    state.last_click,
+                    Some((t, wid)) if wid == id && now.duration_since(t) < std::time::Duration::from_millis(400)
+                );
+                state.last_click = Some((now, id));
+                if double {
+                    fit_window(state);
+                    state.interact.end();
+                } else {
+                    state.interact.begin_move(id, canvas_pt, state.pointer_pos);
+                }
+                return;
+            }
             // Клик по пустому холсту — панорама.
             state.interact.begin_pan(canvas_pt, state.pointer_pos);
         }
     }
+}
+
+/// Окно под полосой заголовка: точка смещается вниз на высоту полосы в мировых единицах.
+fn hit_title_strip(state: &CompositorState, pt: Point2<f32>) -> Option<WindowId> {
+    let strip = phosphor::chrome::STRIP_H / state.camera.zoom.max(0.01);
+    state.canvas.hit_test(Point2::new(pt.x, pt.y + strip))
 }
 
 /// Зона ресайза под курсором (None — центр окна, значит перетаскивание).

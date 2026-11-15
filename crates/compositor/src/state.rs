@@ -45,9 +45,8 @@ use std::cell::RefCell;
 use std::rc::Rc;
 
 /// Графический бэкенд (winit+GLES), которым владеет calloop-цикл.
-pub type Gfx = smithay::backend::winit::WinitGraphicsBackend<
-    smithay::backend::renderer::gles::GlesRenderer,
->;
+pub type Gfx =
+    smithay::backend::winit::WinitGraphicsBackend<smithay::backend::renderer::gles::GlesRenderer>;
 use crate::windows::WindowTracker;
 
 /// Per-client compositor data (required by smithay 0.5).

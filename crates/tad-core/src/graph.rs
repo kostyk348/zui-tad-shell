@@ -93,7 +93,7 @@ impl GraphStore {
         self.vo.remove(id.as_bytes())?;
         let edge_key = vo.parent_ro.as_bytes();
         let mut set = self.edges_get(edge_key)?;
-        set.remove(&id.as_bytes().to_vec());
+        set.remove(id.as_bytes().as_slice());
         self.edges_put(edge_key, &set)?;
         self.db.flush()?;
         Ok(())
@@ -117,7 +117,7 @@ impl GraphStore {
         self.vo.remove(id.as_bytes())?;
         let old_key = old_parent.as_bytes();
         let mut old_set = self.edges_get(old_key)?;
-        old_set.remove(&id.as_bytes().to_vec());
+        old_set.remove(id.as_bytes().as_slice());
         self.edges_put(old_key, &old_set)?;
         vo.parent_ro = new_parent;
         vo.pos = pos;

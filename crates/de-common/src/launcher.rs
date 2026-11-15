@@ -46,7 +46,7 @@ impl Launcher {
                 }
             }
         }
-        entries.sort_by(|a, b| a.name.to_lowercase().cmp(&b.name.to_lowercase()));
+        entries.sort_by_key(|a| a.name.to_lowercase());
         let filtered = (0..entries.len()).collect();
         Self { entries, filtered }
     }
@@ -91,7 +91,7 @@ impl Launcher {
             let term = std::env::var("ZUI_TERMINAL").unwrap_or_else(|_| "xterm".into());
             Command::new(term)
                 .arg("-e")
-                .arg(&parts[0])
+                .arg(parts[0])
                 .args(&parts[1..])
                 .spawn()?;
         } else {
