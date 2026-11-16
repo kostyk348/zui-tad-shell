@@ -243,6 +243,10 @@ The chrome lives in `phosphor::chrome` (pure `tiny_skia`, three unit tests) and 
 | DRM/TTY backend | ⚠ layer 0 **verified live** (`--drm`: session, card, connectors); layer 1 **written & compiling** (`--drm-render`: dumb buffer + `page_flip`) — needs a real TTY to verify |
 | `ext-idle-notify`, TTY input, vblank sync, multi-monitor | ❌ one coherent piece of work: the calloop transition (details in `docs/ROADMAP.md`) |
 
+## Contributing
+
+How to build, test, report bugs and security problems: see [CONTRIBUTING.md](CONTRIBUTING.md).
+
 ## License
 
 MIT. See [LICENSE](LICENSE). Asset provenance: [assets/CREDITS.md](assets/CREDITS.md) —
